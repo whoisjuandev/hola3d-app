@@ -1,32 +1,47 @@
-# React + TypeScript + Vite
+# Hola3D Taller
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Internal app for Hola3D's workshop: orders, projects, calendar, machine service and a cost calculator. It is planned to run at `app.hola3d.com.ar`.
 
-Currently, two official plugins are available:
+Built so far: **Pedidos** works end to end. The other sections show a placeholder until they are built.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Stack
 
-## React Compiler
+- React 19 + Vite + TypeScript, with React Router
+- One Cloudflare Worker that serves the app and the API under `/api/*` (`worker/`)
+- Cloudflare D1 (SQLite) for data (`migrations/`)
+- Domain rules shared by both sides (`shared/`)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Run locally
 
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run db:migrate   # create the local D1 tables
+npm run db:seed      # load sample orders (local only)
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Checks
+
+```bash
+npm test             # Vitest: domain rules, API routes, formatting
+npm run typecheck
+npm run lint
+```
+
+## API
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/api/orders` | List all orders |
+| POST | `/api/orders` | Create an order (stage `nuevo`, next number). Answers 422 with `fields` when data is missing |
+| PUT | `/api/orders/:id/stage` | Move an order to `{ "stage": "listo" }` |
+
+## Before the first deploy
+
+None of these steps has been done yet. Each one creates something in the Cloudflare account.
+
+1. `npx wrangler d1 create hola3d-app`, then paste the `database_id` into `wrangler.jsonc`.
+2. `npx wrangler d1 migrations apply hola3d-app --remote`
+3. Add the custom domain `app.hola3d.com.ar` to the Worker.
+4. Put Cloudflare Access in front of that domain, so only the owners can sign in.
+5. `npm run deploy`
