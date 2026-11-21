@@ -10,9 +10,16 @@
 	"assets": {
 		"not_found_handling": "single-page-application"
 	},
+	"compatibility_flags": ["nodejs_compat"],
 	"observability": {
-		"enabled": true
+		"enabled": true,
+		"head_sampling_rate": 1
 	},
+	// Local development uses a local D1 copy. Before the first deploy, create the database
+	// with `npx wrangler d1 create hola3d-app` and paste its database_id here.
+	"d1_databases": [
+		{ "binding": "DB", "database_name": "hola3d-app", "migrations_dir": "migrations" }
+	],
 	"upload_source_maps": true
 	/**
 	 * Smart Placement
