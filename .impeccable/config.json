@@ -1,0 +1,35 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "src/shell/shell.css"
+        ],
+        "createdAt": "2026-11-21T21:54:25.907Z",
+        "reason": "assistant judgment: full-height panel edge (sidebar/drawer/bottom sheet) in the brand's 3px ink outline from the approved Hola3D Redes canvas, not a card accent"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "src/features/orders/orders.css"
+        ],
+        "createdAt": "2026-11-21T21:54:25.935Z",
+        "reason": "assistant judgment: full-height panel edge (sidebar/drawer/bottom sheet) in the brand's 3px ink outline from the approved Hola3D Redes canvas, not a card accent"
+      },
+      {
+        "rule": "border-accent-on-rounded",
+        "value": "*",
+        "files": [
+          "src/features/orders/orders.css"
+        ],
+        "createdAt": "2026-11-21T21:54:25.961Z",
+        "reason": "assistant judgment: full-height panel edge (sidebar/drawer/bottom sheet) in the brand's 3px ink outline from the approved Hola3D Redes canvas, not a card accent"
+      }
+    ]
+  }
+}
