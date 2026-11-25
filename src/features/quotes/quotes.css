@@ -21,6 +21,9 @@
 .quote-row__total { font-size: 18px; font-weight: 900; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .quote-validity { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--soft); }
 .quote-validity--late { color: var(--red); }
+.quote-no-client {
+  padding: 1px 8px; border-radius: 999px; border: 1px dashed var(--soft); font-size: 11px; font-weight: 800; color: var(--soft); white-space: nowrap;
+}
 
 /* ---- Quote page ---- */
 .quote-page__number { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; font-size: 15px; font-weight: 900; color: var(--soft); }
@@ -54,6 +57,10 @@
 }
 .save-quote__total b { font-size: 24px; font-weight: 900; font-variant-numeric: tabular-nums; }
 .save-quote__total .muted { flex-basis: 100%; }
+.quick-quote__validity { min-width: 0; margin: 0; padding: 0; border: 0; }
+.quick-quote__validity .pills-row { flex-wrap: wrap; margin: 0 0 4px; padding: 2px 0; overflow: visible; }
+.quick-quote__actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.quick-quote__saved { font-weight: 800; }
 .accept-orders { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 12px 16px; list-style: none; border-radius: 14px; background: var(--mist); }
 .accept-orders li { display: flex; justify-content: space-between; gap: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
 
@@ -65,6 +72,7 @@
   .quotes, .quote-page { gap: 16px; }
   .quote-row { align-items: flex-start; }
   .quote-actions .btn { flex: 1 1 calc(50% - 5px); }
+  .quick-quote__actions { grid-template-columns: 1fr; }
   .quote-line { padding: 16px; }
   .quote-line__uses li { grid-template-columns: 22px minmax(0, 1fr) auto; }
   .quote-line__uses li .muted { grid-column: 2 / -1; grid-row: 2; }

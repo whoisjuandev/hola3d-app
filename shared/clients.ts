@@ -1,5 +1,5 @@
 // Client domain shared by the Worker API and the React app.
-import { asBody, readText, type Errors } from './fields';
+import { asBody, readText, type Body, type Errors } from './fields';
 import { normalizeSearch, type Order, type ValidationResult } from './orders';
 
 export interface Client {
@@ -22,17 +22,26 @@ const PHONE_RE = /^\+?[\d\s().-]+$/;
 const HANDLE_RE = /^[A-Za-z0-9._]{1,30}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * An optional phone as a client's: up to 30 characters of digits, +, spaces, dots, dashes and brackets, with 6 to 15
+ * digits. Also the phone of a quick quote's recipient.
+ */
+export function readPhone(body: Body, errors: Errors, key: string): string {
+  const phone = readText(body, errors, key, 30, false);
+  const digits = phone.replace(/\D/g, '').length;
+  if (phone && !errors[key] && (!PHONE_RE.test(phone) || digits < 6 || digits > 15)) {
+    errors[key] = 'Poné el teléfono con números (podés usar +, espacios y guiones).';
+  }
+  return phone;
+}
+
 /** Validate a client for create or update. Error messages are shown to the owners as is. */
 export function validateClient(input: unknown): ValidationResult<ClientInput> {
   const errors: Errors = {};
   const body = asBody(input);
 
   const name = readText(body, errors, 'name', 80, true);
-  const phone = readText(body, errors, 'phone', 30, false);
-  const digits = phone.replace(/\D/g, '').length;
-  if (phone && !errors.phone && (!PHONE_RE.test(phone) || digits < 6 || digits > 15)) {
-    errors.phone = 'Poné el teléfono con números (podés usar +, espacios y guiones).';
-  }
+  const phone = readPhone(body, errors, 'phone');
   const instagram = readText(body, errors, 'instagram', 31, false).replace(/^@/, '').trim();
   if (instagram && !errors.instagram && !HANDLE_RE.test(instagram)) {
     errors.instagram = 'El usuario de Instagram lleva letras, números, puntos o guiones bajos.';

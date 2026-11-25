@@ -52,15 +52,15 @@ const priced = calculateCost(input, [a1], [white], costs);
 
 function stored(overrides: Partial<Quote>): Quote {
   return {
-    id: 1, number: 'P-0001', clientId: 1, client: 'Café Nube', title: 'Llaveros y cartel', status: 'enviado', validUntil: '2026-12-10',
-    input, result: priced, total: priced.total, note: '', createdAt: stamp, updatedAt: stamp, ...overrides,
+    id: 1, number: 'P-0001', clientId: 1, client: 'Café Nube', recipientName: '', recipientPhone: '', title: 'Llaveros y cartel', status: 'enviado',
+    validUntil: '2026-12-10', showBreakdown: false, input, result: priced, total: priced.total, note: '', createdAt: stamp, updatedAt: stamp, ...overrides,
   };
 }
 const sent = stored({});
 const rejected = stored({ id: 2, number: 'P-0002', clientId: 2, client: 'Lucía M.', title: 'Macetas', status: 'rechazado' });
 
-function setup() {
-  const tables = memoryTables([cafe, lucia], [existingOrder], [sent, rejected]);
+function setup(extra: Quote[] = []) {
+  const tables = memoryTables([cafe, lucia], [existingOrder], [sent, rejected, ...extra]);
   const deps = {
     quotes: memoryQuoteRepository(tables),
     orders: memoryOrderRepository(tables),
@@ -125,8 +125,9 @@ describe('POST /api/quotes', () => {
     const { status, body } = await call('POST', '/api/quotes', newQuote);
     expect(status).toBe(201);
     expect(body.quote).toEqual({
-      id: 3, number: 'P-0003', clientId: 2, client: 'Lucía M.', title: 'Llaveros para Lucía', status: 'borrador', validUntil: '2026-12-10',
-      input, result: priced, total: 26200, note: 'Seña del 50 %.', createdAt: expect.any(String), updatedAt: expect.any(String),
+      id: 3, number: 'P-0003', clientId: 2, client: 'Lucía M.', recipientName: '', recipientPhone: '', title: 'Llaveros para Lucía', status: 'borrador',
+      validUntil: '2026-12-10', showBreakdown: false, input, result: priced, total: 26200, note: 'Seña del 50 %.', createdAt: expect.any(String),
+      updatedAt: expect.any(String),
     });
     expect(await quotes.get(3)).toEqual(body.quote);
   });
@@ -406,5 +407,172 @@ describe('profit mode in quotes', () => {
     const accepted = await run('POST', '/api/quotes/4/accept');
     expect(accepted.status).toBe(201);
     expect((accepted.body.orders as Order[]).map((o) => o.price)).toEqual([21200, 5000]);
+  });
+});
+
+describe('quick quotes (no client)', () => {
+  const juan = { recipientName: 'Juan Pérez', recipientPhone: '+54 9 11 5555-0199' };
+  const quick = stored({
+    id: 3, number: 'P-0003', clientId: null, client: null, ...juan, title: 'Llaveros para Juan', validUntil: null, showBreakdown: true,
+  });
+  const newQuick = { ...juan, title: 'Llaveros para Juan', note: 'Entrega en 5 días.', showBreakdown: true, status: 'enviado', input };
+
+  it('saves a quote for a recipient written as text, creating no client', async () => {
+    const { call, quotes, clients } = setup();
+    const { status, body } = await call('POST', '/api/quotes', newQuick);
+    expect(status).toBe(201);
+    expect(body.quote).toEqual({
+      id: 3, number: 'P-0003', clientId: null, client: null, ...juan, title: 'Llaveros para Juan', status: 'enviado', validUntil: null,
+      showBreakdown: true, input, result: priced, total: 26200, note: 'Entrega en 5 días.', createdAt: expect.any(String), updatedAt: expect.any(String),
+    });
+    expect(await quotes.get(3)).toEqual(body.quote);
+    expect(await clients.list()).toEqual([cafe, lucia]);
+  });
+
+  it('starts a quote with a client as borrador when no status is sent, and takes enviado and a validity date', async () => {
+    const { call } = setup();
+    expect((await call('POST', '/api/quotes', newQuote)).body.quote).toMatchObject({ status: 'borrador', showBreakdown: false });
+    expect((await call('POST', '/api/quotes', { ...newQuick, validUntil: '2026-12-10', status: 'enviado' })).body.quote)
+      .toMatchObject({ validUntil: '2026-12-10', status: 'enviado' });
+  });
+
+  it('returns field errors and stores nothing for a missing recipient, a wrong phone or a status other than borrador or enviado', async () => {
+    const { call, quotes, clients } = setup();
+    expect(await call('POST', '/api/quotes', { ...newQuick, recipientName: ' ', recipientPhone: 'llamame', status: 'aceptado', showBreakdown: 'sí' })).toEqual({
+      status: 422,
+      body: {
+        error: 'Revisá los datos del presupuesto.',
+        fields: {
+          recipientName: 'Completá este dato.', recipientPhone: 'Poné el teléfono con números (podés usar +, espacios y guiones).',
+          status: 'Un presupuesto nuevo empieza como borrador o enviado.', showBreakdown: 'Elegí si se incluye el desglose de costos.',
+        },
+      },
+    });
+    expect(await quotes.list()).toEqual([rejected, sent]);
+    expect(await clients.list()).toEqual([cafe, lucia]);
+  });
+
+  it('lists it with no client and its recipient, and serves it with no client record', async () => {
+    const { call } = setup([quick]);
+    expect(await call('GET', '/api/quotes')).toEqual({ status: 200, body: { quotes: [quick, rejected, sent] } });
+    expect(await call('GET', '/api/quotes/3')).toEqual({ status: 200, body: { quote: quick, client: null, orders: [] } });
+    expect(await call('GET', '/api/quotes?clientId=1')).toEqual({ status: 200, body: { quotes: [sent] } });
+  });
+
+  it('edits the recipient, the breakdown switch and the validity, writing only what was sent', async () => {
+    const { call, quotes } = setup([quick]);
+    const { status, body } = await call('PUT', '/api/quotes/3', { recipientName: ' Juan P. ', recipientPhone: '', showBreakdown: false, validUntil: '2026-12-31' });
+    expect(status).toBe(200);
+    expect(body.quote).toEqual({ ...quick, recipientName: 'Juan P.', recipientPhone: '', showBreakdown: false, validUntil: '2026-12-31', updatedAt: expect.any(String) });
+    expect(await quotes.get(3)).toEqual(body.quote);
+    expect((await call('PUT', '/api/quotes/3', { validUntil: null })).body.quote).toMatchObject({ validUntil: null, recipientName: 'Juan P.' });
+    expect((await call('PUT', '/api/quotes/1', { showBreakdown: true })).body.quote).toEqual({ ...sent, showBreakdown: true, updatedAt: expect.any(String) });
+  });
+
+  it('keeps the recipient name of a quote without a client, and checks the phone and the switch, changing nothing', async () => {
+    const { call, quotes } = setup([quick]);
+    expect(await call('PUT', '/api/quotes/3', { recipientName: '', recipientPhone: '12', showBreakdown: 'no' })).toEqual({
+      status: 422,
+      body: {
+        error: 'Revisá los datos del presupuesto.',
+        fields: {
+          recipientName: 'Completá este dato.', recipientPhone: 'Poné el teléfono con números (podés usar +, espacios y guiones).',
+          showBreakdown: 'Elegí si se incluye el desglose de costos.',
+        },
+      },
+    });
+    expect(await quotes.get(3)).toEqual(quick);
+  });
+
+  it('accepting asks for the client first, creating nothing', async () => {
+    const { call, quotes, orders, clients } = setup([quick]);
+    for (const body of [undefined, {}, { channel: 'Instagram', client: ' ' }]) {
+      expect(await call('POST', '/api/quotes/3/accept', body)).toEqual({
+        status: 422,
+        body: { error: 'Revisá los datos del presupuesto.', fields: { client: 'Elegí el cliente o escribí uno nuevo: los pedidos se crean a su nombre.' } },
+      });
+    }
+    expect(await call('POST', '/api/quotes/3/accept', { clientId: 99 })).toEqual({
+      status: 422, body: { error: 'Revisá los datos del presupuesto.', fields: { clientId: 'Ese cliente no existe.' } },
+    });
+    expect(await call('POST', '/api/quotes/3/accept', { clientId: 'dos' })).toEqual({
+      status: 422, body: { error: 'Revisá los datos del presupuesto.', fields: { clientId: 'Elegí un cliente de la lista.' } },
+    });
+    expect(await quotes.get(3)).toEqual(quick);
+    expect(await orders.list()).toEqual([existingOrder]);
+    expect(await clients.list()).toEqual([cafe, lucia]);
+  });
+
+  it('accepting for a client of the list links the quote to it and creates the orders for it, leaving the client as it was', async () => {
+    const { call, quotes, orders, clients } = setup([quick]);
+    const { status, body } = await call('POST', '/api/quotes/3/accept', { clientId: 2, channel: 'Instagram' });
+    expect(status).toBe(201);
+    expect(body.quote).toEqual({ ...quick, clientId: 2, client: 'Lucía M.', status: 'aceptado', updatedAt: expect.any(String) });
+    expect((body.orders as Order[]).map((o) => [o.item, o.clientId, o.client, o.quoteId, o.price, o.channel])).toEqual([
+      ['Llavero con logo × 12', 2, 'Lucía M.', 3, 21200, 'Instagram'],
+      ['Cartel', 2, 'Lucía M.', 3, 5000, 'Instagram'],
+    ]);
+    expect(await quotes.get(3)).toEqual(body.quote);
+    expect(await orders.list()).toEqual([existingOrder, ...(body.orders as Order[])]);
+    expect(await clients.list()).toEqual([cafe, lucia]);
+  });
+
+  it('accepting for a name matches a client of the list, keeping its phone', async () => {
+    const { call, clients } = setup([quick]);
+    const { status, body } = await call('POST', '/api/quotes/3/accept', { client: ' cafe NUBE ' });
+    expect(status).toBe(201);
+    expect(body.quote).toMatchObject({ clientId: 1, client: 'Café Nube' });
+    expect(await clients.list()).toEqual([cafe, lucia]);
+  });
+
+  it('accepting for a new name creates the client with the recipient\'s phone', async () => {
+    const { call, clients, orders } = setup([quick]);
+    const { status, body } = await call('POST', '/api/quotes/3/accept', { client: 'Juan Pérez' });
+    expect(status).toBe(201);
+    expect(body.quote).toMatchObject({ clientId: 3, client: 'Juan Pérez', status: 'aceptado' });
+    expect((await clients.get(3))).toMatchObject({ name: 'Juan Pérez', phone: '+54 9 11 5555-0199', instagram: '', email: '', note: '' });
+    expect((await orders.list()).filter((o) => o.quoteId === 3).map((o) => o.clientId)).toEqual([3, 3]);
+  });
+
+  it('accepts only once: a second accept, for another client, answers 409 and creates nothing', async () => {
+    const { call, quotes, orders, clients } = setup([quick]);
+    await call('POST', '/api/quotes/3/accept', { clientId: 2 });
+    const before = { quote: await quotes.get(3), orders: await orders.list(), clients: await clients.list() };
+    expect(await call('POST', '/api/quotes/3/accept', { client: 'Otro cliente' })).toEqual({
+      status: 409, body: { error: 'El presupuesto P-0003 ya fue aceptado.' },
+    });
+    expect({ quote: await quotes.get(3), orders: await orders.list(), clients: await clients.list() }).toEqual(before);
+    expect(before.quote).toMatchObject({ clientId: 2 });
+  });
+
+  it('of four accepts at once, one creates the orders and links the client; the others answer 409', async () => {
+    const { call, quotes, orders } = setup([quick]);
+    const answers = await Promise.all([1, 2, 1, 2].map((clientId) => call('POST', '/api/quotes/3/accept', { clientId })));
+    expect(answers.map((a) => a.status).sort()).toEqual([201, 409, 409, 409]);
+    const linked = (await quotes.get(3))!;
+    expect(linked.status).toBe('aceptado');
+    expect([1, 2]).toContain(linked.clientId);
+    const made = (await orders.list()).filter((o) => o.quoteId === 3);
+    expect(made).toHaveLength(2);
+    expect(made.every((o) => o.clientId === linked.clientId)).toBe(true);
+  });
+
+  it('does not accept a rejected quick quote: 409, and no client is created', async () => {
+    const { call, quotes, orders, clients } = setup([{ ...quick, status: 'rechazado' }]);
+    expect(await call('POST', '/api/quotes/3/accept', { client: 'Juan Pérez' })).toEqual({
+      status: 409, body: { error: 'El presupuesto P-0003 está rechazado: no se puede aceptar.' },
+    });
+    expect(await quotes.get(3)).toMatchObject({ clientId: null, status: 'rechazado' });
+    expect(await orders.list()).toEqual([existingOrder]);
+    expect(await clients.list()).toEqual([cafe, lucia]);
+  });
+
+  it('accepting a quote with a client ignores a client sent in the body, as before', async () => {
+    const { call, clients } = setup();
+    const { status, body } = await call('POST', '/api/quotes/1/accept', { clientId: 'dos', client: 'Otro cliente' });
+    expect(status).toBe(201);
+    expect(body.quote).toMatchObject({ clientId: 1, client: 'Café Nube' });
+    expect((body.orders as Order[]).map((o) => o.clientId)).toEqual([1, 1]);
+    expect(await clients.list()).toEqual([cafe, lucia]);
   });
 });

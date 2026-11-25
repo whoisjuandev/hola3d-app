@@ -29,6 +29,15 @@
 
 .quote-doc__validity { font-size: 16px; font-weight: 700; }
 .quote-doc__note { padding: 12px 14px; border-radius: 10px; border: 2px dashed var(--rule); font-size: 15px; line-height: 22px; white-space: pre-line; }
+.quote-doc__costs { display: flex; flex-direction: column; gap: 10px; break-inside: avoid; }
+.quote-doc__pieces { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 22px; }
+.quote-doc__piece { break-inside: avoid; }
+.quote-doc__piece-name { margin-bottom: 4px; font-size: 14px; font-weight: 900; }
+.quote-doc__cost { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px solid var(--rule); font-size: 13px; font-weight: 700; }
+.quote-doc__cost dd { margin: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.quote-doc__cost--total { font-weight: 900; border-bottom-color: var(--ink); }
+.quote-doc__cost-totals { display: flex; flex-direction: column; margin: 0; padding-top: 4px; }
+.quote-doc__cost-totals .quote-doc__cost { font-size: 15px; font-weight: 900; }
 .quote-doc__foot { margin-top: auto; padding-top: 18px; border-top: 2px solid var(--rule); font-size: 22px; color: var(--blue); }
 
 @media (max-width: 760px) {

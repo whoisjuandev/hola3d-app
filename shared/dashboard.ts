@@ -50,11 +50,11 @@ export interface DashboardServiceTask {
 export interface DashboardQuote {
   id: number;
   number: string;
-  clientId: number;
-  client: string;
+  clientId: number | null; // null for a quick quote, not accepted yet
+  client: string; // the client's name, or the recipient's of a quick quote
   title: string;
   total: number;
-  validUntil: string; // YYYY-MM-DD
+  validUntil: string | null; // YYYY-MM-DD; null means no deadline
   expired: boolean; // its validity date is before today
 }
 
@@ -81,7 +81,7 @@ export interface DashboardSources {
   orders: Pick<Order, 'id' | 'item' | 'client' | 'clientId' | 'project' | 'stage' | 'dueDate' | 'dueTime' | 'price' | 'deliveredAt' | 'realCost' | 'realProfit'>[];
   spools: Pick<Spool, 'id' | 'material' | 'colorName' | 'colorHex' | 'brand' | 'remainingGrams' | 'netGrams' | 'lowStockGrams'>[];
   tasks: Pick<ServiceTask, 'id' | 'name' | 'printerId' | 'printer' | 'printerMinutes' | 'intervalHours' | 'intervalDays' | 'lastDoneMinutes' | 'lastDoneDate' | 'active'>[];
-  quotes: Pick<Quote, 'id' | 'number' | 'clientId' | 'client' | 'title' | 'status' | 'total' | 'validUntil'>[];
+  quotes: Pick<Quote, 'id' | 'number' | 'clientId' | 'client' | 'recipientName' | 'title' | 'status' | 'total' | 'validUntil'>[];
 }
 
 const byText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -151,10 +151,11 @@ export function dashboardData(sources: DashboardSources, today: string, limit = 
   const quotesWaiting: DashboardQuote[] = sources.quotes
     .filter((q) => q.status === 'enviado')
     .map((q) => ({
-      id: q.id, number: q.number, clientId: q.clientId, client: q.client, title: q.title, total: q.total, validUntil: q.validUntil,
+      id: q.id, number: q.number, clientId: q.clientId, client: q.client ?? q.recipientName, title: q.title, total: q.total, validUntil: q.validUntil,
       expired: isQuoteExpired(q, today),
     }))
-    .sort((a, b) => byText(a.validUntil, b.validUntil) || a.id - b.id);
+    // A quote without a deadline goes after the dated ones.
+    .sort((a, b) => byText(a.validUntil ?? '9999', b.validUntil ?? '9999') || a.id - b.id);
 
   return {
     today,

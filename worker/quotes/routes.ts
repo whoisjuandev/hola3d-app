@@ -1,7 +1,8 @@
 import { calculateCost } from '../../shared/calculator';
+import { sentFields } from '../../shared/fields';
 import {
   canAcceptQuote, canChangeQuoteStatus, missingReferences, ordersFromQuote, validateAcceptQuote, validateNewQuote, validateQuoteChanges,
-  type Quote,
+  validateQuoteClient, type Quote,
 } from '../../shared/quotes';
 import type { ClientRepository } from '../clients/repository';
 import { resolveClient } from '../clients/resolve';
@@ -51,7 +52,9 @@ export async function handleQuotes(request: Request, url: URL, deps: QuoteDeps):
     if (request.method === 'GET') {
       const quote = await quotes.get(id);
       if (!quote) return notFound(id);
-      const [client, orders] = await Promise.all([deps.clients.get(quote.clientId), deps.orders.listByQuote(id)]);
+      const [client, orders] = await Promise.all([
+        quote.clientId === null ? null : deps.clients.get(quote.clientId), deps.orders.listByQuote(id),
+      ]);
       return json({ quote, client, orders });
     }
     if (request.method === 'PUT') return update(request, id, quotes);
@@ -67,59 +70,83 @@ export async function handleQuotes(request: Request, url: URL, deps: QuoteDeps):
   return null;
 }
 
-/** Price the calculator input with what is stored right now and freeze it. A total sent by the browser is ignored. */
+/**
+ * Price the calculator input with what is stored right now and freeze it. A total sent by the browser is ignored. A
+ * quick quote names a recipient instead of a client and creates no client.
+ */
 async function create(request: Request, deps: QuoteDeps): Promise<Response> {
   const body = await readJson(request);
   if (body === undefined) return problem(400, 'El cuerpo tiene que ser JSON.');
   const result = validateNewQuote(body);
   if (!result.ok) return invalid(result.errors);
-  const { input, client: _name, clientId: _id, ...rest } = result.value;
+  const { input, client: name, clientId: id, ...rest } = result.value;
 
   const [printers, spools, settings] = await Promise.all([deps.printers.list(), deps.spools.list(), currentCostSettings(deps.settings)]);
   // Checked before the client is resolved, so a rejected quote never leaves a new client behind.
   const missing = missingReferences(input, printers, spools);
   if (missing) return invalid({ input: missing });
 
-  const client = await resolveClient(result.value, deps.clients);
-  if ('errors' in client) return invalid(client.errors);
+  let clientId: number | null = null;
+  if (id !== null || name !== '') {
+    const client = await resolveClient({ client: name, clientId: id }, deps.clients);
+    if ('errors' in client) return invalid(client.errors);
+    clientId = client.id;
+  }
 
   const { updatedAt: _updatedAt, ...costs } = settings;
   const priced = calculateCost(input, printers, spools, costs);
-  return json({ quote: await deps.quotes.create({ ...rest, clientId: client.id, input, result: priced }) }, 201);
+  return json({ quote: await deps.quotes.create({ ...rest, clientId, input, result: priced }) }, 201);
 }
 
-/** Change the title, validity, note or status. The lines, breakdown and total never change. */
+/**
+ * Change the title, validity, note, status, recipient or breakdown switch; only the fields sent are written. The client,
+ * lines, breakdown and total never change here.
+ */
 async function update(request: Request, id: number, quotes: QuoteRepository): Promise<Response> {
   const body = await readJson(request);
   if (!isJsonObject(body)) return problem(400, 'El cuerpo tiene que ser JSON.');
   const current = await quotes.get(id);
   if (!current) return notFound(id);
-  // Fields left out of the body keep their stored value; only these four can change.
-  const { title, validUntil, note, status } = { ...current, ...body };
-  const result = validateQuoteChanges({ title, validUntil, note, status });
+  // The request is checked merged with the stored values, so a quote without a client keeps a recipient name.
+  const { title, validUntil, note, status, recipientName, recipientPhone, showBreakdown } = { ...current, ...body };
+  const result = validateQuoteChanges({ title, validUntil, note, status, recipientName, recipientPhone, showBreakdown }, current.clientId === null);
   if (!result.ok) return invalid(result.errors);
-  const next = result.value;
+  const next = sentFields(result.value, body);
   if (next.status === 'aceptado' && current.status !== 'aceptado') {
     return invalid({ status: 'Para aceptarlo usá «Aceptar»: así se crean los pedidos.' });
   }
   const conflict = () => problem(409, `El presupuesto ${current.number} ya fue aceptado: no cambia de estado.`);
-  if (!canChangeQuoteStatus(current.status, next.status)) return conflict();
+  if (next.status !== undefined && !canChangeQuoteStatus(current.status, next.status)) return conflict();
   const quote = await quotes.update(id, next);
   // Null here means an accept landed after the read above.
   return quote ? json({ quote }) : conflict();
 }
 
-/** Turn every line into an order for the client, at its frozen price, and mark the quote aceptado. Only once. */
+/**
+ * Turn every line into an order for the client, at its frozen price, and mark the quote aceptado. Only once. A quote
+ * without a client is first given one, picked or named in the body like an order's (a new client gets the recipient's
+ * phone), and linked to it in the same write that creates the orders.
+ */
 async function accept(request: Request, id: number, deps: QuoteDeps): Promise<Response> {
   // The body is optional: without one the orders come through WhatsApp.
-  const result = validateAcceptQuote((await readJson(request)) ?? {});
+  const body = (await readJson(request)) ?? {};
+  const result = validateAcceptQuote(body);
   const quote = await deps.quotes.get(id);
   if (!quote) return notFound(id);
   if (!result.ok) return invalid(result.errors);
   if (quote.status === 'aceptado') return alreadyAccepted(quote);
   if (!canAcceptQuote(quote.status)) return problem(409, `El presupuesto ${quote.number} está rechazado: no se puede aceptar.`);
 
-  const accepted = await deps.quotes.accept(id, quote.clientId, ordersFromQuote(quote, result.value.channel));
+  let clientId = quote.clientId;
+  if (clientId === null) {
+    const named = validateQuoteClient(body);
+    if (!named.ok) return invalid(named.errors);
+    const client = await resolveClient(named.value, deps.clients, { phone: quote.recipientPhone });
+    if ('errors' in client) return invalid(client.errors);
+    clientId = client.id;
+  }
+
+  const accepted = await deps.quotes.accept(id, clientId, ordersFromQuote(quote, result.value.channel));
   // False here means another accept (or a rejection) landed after the read above; nothing was written.
   if (!accepted) return problem(409, `El presupuesto ${quote.number} ya no se puede aceptar: recargá la página.`);
   const [saved, orders] = await Promise.all([deps.quotes.get(id), deps.orders.listByQuote(id)]);

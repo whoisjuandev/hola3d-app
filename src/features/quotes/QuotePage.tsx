@@ -2,14 +2,15 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import type { Channel } from '../../../shared/orders';
 import { resultProfit } from '../../../shared/profit';
-import { canAcceptQuote, formatDay, quoteWhatsappUrl, type QuoteStatus } from '../../../shared/quotes';
+import { canAcceptQuote, formatDay, quoteContact, quoteWhatsappUrl, type QuoteStatus } from '../../../shared/quotes';
 import { Icon } from '../../ui/Icon';
 import { Summary } from '../calculator/components';
 import { ClientOrderRow } from '../clients/components';
+import type { ClientReference } from '../clients/picker';
 import { ErrorBanner } from '../orders/components';
 import { isoDate } from '../orders/format';
 import { acceptQuote, fetchQuote, updateQuote, type QuoteDetail } from './api';
-import { AcceptDialog, EditQuoteDialog, FrozenLine, QuoteStatusChip, Validity } from './components';
+import { AcceptDialog, EditQuoteDialog, FrozenLine, NoClientTag, QuoteStatusChip, Validity } from './components';
 import '../orders/orders.css';
 import '../clients/clients.css';
 import '../calculator/calculator.css';
@@ -67,9 +68,11 @@ export function QuotePage() {
     }
   };
 
-  const accept = async (channel: Channel) => {
-    const accepted = await acceptQuote(quote.id, channel);
-    setState((s) => (s.status === 'ready' ? { ...s, ...accepted } : s));
+  const accept = async (channel: Channel, clientRef?: ClientReference) => {
+    const accepted = await acceptQuote(quote.id, channel, clientRef);
+    // A quote without a client now has one: read it again for its record (the phone for WhatsApp).
+    const detail = quote.clientId === null ? await fetchQuote(quote.id).catch(() => null) : null;
+    setState((s) => (s.status === 'ready' ? { ...s, ...accepted, ...detail } : s));
   };
 
   return (
@@ -81,7 +84,9 @@ export function QuotePage() {
           <p className="quote-page__number">{quote.number} <QuoteStatusChip status={quote.status} /></p>
           <h1 className="page-title">{quote.title}</h1>
           <p className="page-sub quote-page__sub">
-            <span>Para <Link to={`/clientes/${quote.clientId}`}>{quote.client}</Link></span>
+            {quote.clientId === null
+              ? <span>Para <b>{quote.recipientName}</b> <NoClientTag /></span>
+              : <span>Para <Link to={`/clientes/${quote.clientId}`}>{quote.client}</Link></span>}
             <Validity quote={quote} today={today} />
             <span>Guardado el {formatDay(isoDate(new Date(quote.createdAt)))}</span>
           </p>
@@ -98,7 +103,7 @@ export function QuotePage() {
         {(quote.status === 'enviado' || quote.status === 'rechazado') && (
           <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => void move('borrador')}>Volver a borrador</button>
         )}
-        <a className="btn btn--ghost" href={quoteWhatsappUrl(quote, client?.phone ?? '')} target="_blank" rel="noreferrer">
+        <a className="btn btn--ghost" href={quoteWhatsappUrl(quote, quoteContact(quote, client).phone)} target="_blank" rel="noreferrer">
           <Icon name="chat" />WhatsApp
         </a>
         <Link className="btn btn--ghost" to={`/presupuestos/${quote.id}/imprimir`}><Icon name="print" />Imprimir o PDF</Link>
@@ -132,7 +137,7 @@ export function QuotePage() {
           <Summary result={quote.result} settings={quote.result.settings} />
           <p className="muted calc__note">
             Costos y precios congelados al guardar. Si cambian los costos del taller, las bobinas o las impresoras, este presupuesto no cambia.
-            El cliente no ve este desglose.
+            {quote.showBreakdown ? ' El PDF incluye el desglose de costos de cada pieza.' : ' El cliente no ve este desglose.'}
           </p>
         </aside>
       </div>

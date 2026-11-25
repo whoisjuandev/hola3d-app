@@ -3,8 +3,8 @@ import { calculateCost, type CalcInput, type CalcLineInput, type CalcPrinter, ty
 import { DEFAULT_COST_SETTINGS } from './cost-settings';
 import {
   addDays, canAcceptQuote, isQuoteExpired, canChangeQuoteStatus, defaultValidUntil, formatDay, formatPesos, formatQuoteNumber, missingReferences,
-  ordersFromQuote, quoteWhatsappMessage, quoteWhatsappUrl, validateAcceptQuote, validateNewQuote, validateQuoteChanges,
-  QUOTE_STATUSES, calculationSummary, type Quote,
+  ordersFromQuote, quoteContact, quoteWhatsappMessage, quoteWhatsappUrl, validateAcceptQuote, validateNewQuote, validateQuoteChanges,
+  validateQuoteClient, QUOTE_STATUSES, calculationSummary, type Quote,
 } from './quotes';
 
 const a1: CalcPrinter = { id: 1, name: 'La A1', purchasePrice: 720000, lifetimeHours: 5000, powerWatts: 100 };
@@ -51,7 +51,10 @@ describe('quote numbers and dates', () => {
 describe('validateNewQuote', () => {
   it('accepts a client id, title, validity, note and calculator input, trimmed', () => {
     const r = validateNewQuote({ ...valid, title: '  Llaveros y cartel ', input: { lines: [{ ...line(), name: ' Llavero con logo ' }] } });
-    expect(r).toEqual({ ok: true, value: { client: '', clientId: 3, title: 'Llaveros y cartel', validUntil: '2026-12-10', note: 'Seña del 50 %.', input: { lines: [line()] } } });
+    expect(r).toEqual({ ok: true, value: {
+      client: '', clientId: 3, recipientName: '', recipientPhone: '', title: 'Llaveros y cartel', validUntil: '2026-12-10', note: 'Seña del 50 %.',
+      showBreakdown: false, status: 'borrador', input: { lines: [line()] },
+    } });
   });
 
   it('accepts a client name instead of an id, and an empty note', () => {
@@ -61,14 +64,14 @@ describe('validateNewQuote', () => {
 
   it('keeps only the calculator fields of the input and ignores a total sent by the browser', () => {
     const r = validateNewQuote({ ...valid, total: 1, result: { total: 1 }, input: { lines: [{ ...line(), extra: 'x', filaments: [{ spoolId: 1, gramsPerUnit: 8, material: '', pricePerKg: 0, cost: 1 }] }] } });
-    expect(r.ok && r.value).toEqual({ client: '', clientId: 3, title: 'Llaveros y cartel', validUntil: '2026-12-10', note: 'Seña del 50 %.', input: { lines: [line()] } });
+    expect(r.ok && r.value).toEqual({
+      client: '', clientId: 3, recipientName: '', recipientPhone: '', title: 'Llaveros y cartel', validUntil: '2026-12-10', note: 'Seña del 50 %.',
+      showBreakdown: false, status: 'borrador', input: { lines: [line()] },
+    });
   });
 
-  it('asks for a client, a title and a real validity date', () => {
-    expect(validateNewQuote({ input })).toEqual({
-      ok: false,
-      errors: { client: 'Completá este dato.', title: 'Completá este dato.', validUntil: 'Poné hasta qué fecha vale el presupuesto.' },
-    });
+  it('asks for a client and a title, and a validity date when one is given', () => {
+    expect(validateNewQuote({ input })).toEqual({ ok: false, errors: { client: 'Completá este dato.', title: 'Completá este dato.' } });
     expect(validateNewQuote({ ...valid, clientId: 'tres', validUntil: '2026-02-30' })).toEqual({
       ok: false, errors: { clientId: 'Elegí un cliente de la lista.', validUntil: 'La fecha tiene que ser AAAA-MM-DD.' },
     });
@@ -94,6 +97,70 @@ describe('validateNewQuote', () => {
   });
 });
 
+describe('validateNewQuote without a client (quick quote)', () => {
+  const quickBody = { recipientName: ' Juan Pérez ', recipientPhone: ' +54 9 11 5555-0199 ', title: 'Llaveros', input };
+
+  it('takes a recipient name instead of a client, with an optional phone, no validity, the breakdown off and borrador', () => {
+    expect(validateNewQuote(quickBody)).toEqual({
+      ok: true,
+      value: {
+        client: '', clientId: null, recipientName: 'Juan Pérez', recipientPhone: '+54 9 11 5555-0199', title: 'Llaveros', validUntil: null, note: '',
+        showBreakdown: false, status: 'borrador', input,
+      },
+    });
+    expect(validateNewQuote({ ...quickBody, recipientPhone: undefined })).toMatchObject({ ok: true, value: { recipientPhone: '' } });
+  });
+
+  it('takes a validity date or none, the breakdown switch and enviado', () => {
+    expect(validateNewQuote({ ...quickBody, validUntil: '2026-12-10', showBreakdown: true, status: 'enviado' })).toMatchObject({
+      ok: true, value: { validUntil: '2026-12-10', showBreakdown: true, status: 'enviado' },
+    });
+    for (const validUntil of [null, '']) expect(validateNewQuote({ ...quickBody, validUntil })).toMatchObject({ ok: true, value: { validUntil: null } });
+    expect(validateNewQuote({ ...quickBody, validUntil: '2026-02-30' })).toEqual({ ok: false, errors: { validUntil: 'La fecha tiene que ser AAAA-MM-DD.' } });
+  });
+
+  it('asks for the recipient name, up to 80 characters, and checks the phone like a client\'s', () => {
+    expect(validateNewQuote({ ...quickBody, recipientName: ' ' })).toEqual({ ok: false, errors: { recipientName: 'Completá este dato.' } });
+    expect(validateNewQuote({ ...quickBody, recipientName: 'x'.repeat(81) })).toEqual({ ok: false, errors: { recipientName: 'Máximo 80 caracteres.' } });
+    expect(validateNewQuote({ ...quickBody, recipientName: 'x'.repeat(80) })).toMatchObject({ ok: true });
+    for (const recipientPhone of ['llamame', '12345', '1'.repeat(16)]) {
+      expect(validateNewQuote({ ...quickBody, recipientPhone })).toEqual({
+        ok: false, errors: { recipientPhone: 'Poné el teléfono con números (podés usar +, espacios y guiones).' },
+      });
+    }
+  });
+
+  it('starts only as borrador or enviado, and the switch is true or false', () => {
+    for (const status of ['aceptado', 'rechazado', 'perdido']) {
+      expect(validateNewQuote({ ...quickBody, status })).toEqual({ ok: false, errors: { status: 'Un presupuesto nuevo empieza como borrador o enviado.' } });
+    }
+    expect(validateNewQuote({ ...quickBody, showBreakdown: 'sí' })).toEqual({ ok: false, errors: { showBreakdown: 'Elegí si se incluye el desglose de costos.' } });
+    expect(validateNewQuote({ ...valid, status: 'enviado', showBreakdown: true })).toMatchObject({ ok: true, value: { clientId: 3, status: 'enviado', showBreakdown: true } });
+  });
+
+  it('with a client, does not read the recipient fields', () => {
+    expect(validateNewQuote({ ...valid, recipientName: 'Juan', recipientPhone: 'llamame' })).toMatchObject({
+      ok: true, value: { clientId: 3, recipientName: '', recipientPhone: '' },
+    });
+  });
+});
+
+describe('validateQuoteClient', () => {
+  it('takes the client a quick quote is accepted for, by id or by name', () => {
+    expect(validateQuoteClient({ clientId: 2 })).toEqual({ ok: true, value: { client: '', clientId: 2 } });
+    expect(validateQuoteClient({ client: ' Bruno A. ' })).toEqual({ ok: true, value: { client: 'Bruno A.', clientId: null } });
+  });
+
+  it('asks for one, and a client id from the list', () => {
+    const ask = { ok: false, errors: { client: 'Elegí el cliente o escribí uno nuevo: los pedidos se crean a su nombre.' } };
+    expect(validateQuoteClient({})).toEqual(ask);
+    expect(validateQuoteClient(undefined)).toEqual(ask);
+    expect(validateQuoteClient({ client: ' ' })).toEqual(ask);
+    expect(validateQuoteClient({ clientId: 'dos' })).toEqual({ ok: false, errors: { clientId: 'Elegí un cliente de la lista.' } });
+    expect(validateQuoteClient({ client: 'x'.repeat(81) })).toEqual({ ok: false, errors: { client: 'Máximo 80 caracteres.' } });
+  });
+});
+
 describe('missingReferences', () => {
   it('names the first piece whose printer or spool is not stored', () => {
     expect(missingReferences(input, [a1], [white])).toBeNull();
@@ -105,13 +172,31 @@ describe('missingReferences', () => {
 
 describe('validateQuoteChanges', () => {
   it('accepts a title, validity, note and a known status', () => {
-    expect(validateQuoteChanges({ title: ' Nuevo título ', validUntil: '2026-12-31', note: '', status: 'enviado' })).toEqual({
-      ok: true, value: { title: 'Nuevo título', validUntil: '2026-12-31', note: '', status: 'enviado' },
+    expect(validateQuoteChanges({ title: ' Nuevo título ', validUntil: '2026-12-31', note: '', status: 'enviado' }, false)).toEqual({
+      ok: true,
+      value: { title: 'Nuevo título', validUntil: '2026-12-31', note: '', status: 'enviado', recipientName: '', recipientPhone: '', showBreakdown: false },
     });
   });
 
+  it('accepts no validity, the recipient and the breakdown switch', () => {
+    const quick = { title: 'Llaveros', validUntil: null, note: '', status: 'enviado', recipientName: ' Juan ', recipientPhone: '11 5555-0199', showBreakdown: true };
+    expect(validateQuoteChanges(quick, true)).toEqual({ ok: true, value: { ...quick, recipientName: 'Juan' } });
+  });
+
+  it('asks for the recipient name only of a quote without a client, and checks the phone and the switch', () => {
+    const quick = { title: 'Llaveros', validUntil: null, note: '', status: 'enviado', recipientName: '', recipientPhone: 'llamame', showBreakdown: 1 };
+    expect(validateQuoteChanges(quick, true)).toEqual({
+      ok: false,
+      errors: {
+        recipientName: 'Completá este dato.', recipientPhone: 'Poné el teléfono con números (podés usar +, espacios y guiones).',
+        showBreakdown: 'Elegí si se incluye el desglose de costos.',
+      },
+    });
+    expect(validateQuoteChanges({ ...quick, recipientPhone: '', showBreakdown: false }, false)).toMatchObject({ ok: true, value: { recipientName: '' } });
+  });
+
   it('rejects an empty title, a wrong date and an unknown status', () => {
-    expect(validateQuoteChanges({ title: '', validUntil: '10/12/2026', note: '', status: 'perdido' })).toEqual({
+    expect(validateQuoteChanges({ title: '', validUntil: '10/12/2026', note: '', status: 'perdido' }, false)).toEqual({
       ok: false,
       errors: { title: 'Completá este dato.', validUntil: 'La fecha tiene que ser AAAA-MM-DD.', status: 'Ese estado no existe.' },
     });
@@ -145,6 +230,11 @@ describe('isQuoteExpired', () => {
     expect(isQuoteExpired({ status: 'aceptado', validUntil: '2026-11-01' }, '2026-11-25')).toBe(false);
     expect(isQuoteExpired({ status: 'rechazado', validUntil: '2026-11-01' }, '2026-11-25')).toBe(false);
   });
+
+  it('never marks a quote without a validity date', () => {
+    expect(isQuoteExpired({ status: 'enviado', validUntil: null }, '2099-01-01')).toBe(false);
+    expect(isQuoteExpired({ status: 'borrador', validUntil: null }, '2099-01-01')).toBe(false);
+  });
 });
 
 describe('validateAcceptQuote', () => {
@@ -158,9 +248,11 @@ describe('validateAcceptQuote', () => {
 
 const result = calculateCost(input, [a1], [white], DEFAULT_COST_SETTINGS);
 const quote: Quote = {
-  id: 3, number: 'P-0003', clientId: 3, client: 'Café Nube', title: 'Llaveros y cartel', status: 'enviado', validUntil: '2026-12-10',
-  input, result, total: result.total, note: '', createdAt: '2026-11-25T12:00:00.000Z', updatedAt: '2026-11-25T12:00:00.000Z',
+  id: 3, number: 'P-0003', clientId: 3, client: 'Café Nube', recipientName: '', recipientPhone: '', title: 'Llaveros y cartel', status: 'enviado',
+  validUntil: '2026-12-10', showBreakdown: false, input, result, total: result.total, note: '', createdAt: '2026-11-25T12:00:00.000Z',
+  updatedAt: '2026-11-25T12:00:00.000Z',
 };
+const quickQuote: Quote = { ...quote, clientId: null, client: null, recipientName: 'Juan Pérez', recipientPhone: '+54 9 11 5555-0199', validUntil: null };
 
 describe('ordersFromQuote', () => {
   it('makes one order per line: name and quantity as the item, the frozen line price, the channel', () => {
@@ -188,6 +280,28 @@ describe('WhatsApp message', () => {
 
   it('adds the note for the client at the end', () => {
     expect(quoteWhatsappMessage({ ...quote, note: 'Seña del 50 % para empezar.' })).toMatch(/Válido hasta el 10\/12\/2026\.\n\nSeña del 50 % para empezar\.$/);
+  });
+
+  it('greets the recipient of a quote without a client, and leaves the validity out when there is none', () => {
+    expect(quoteWhatsappMessage({ ...quickQuote, note: 'Entrega en 5 días.' })).toBe([
+      '¡Hola, Juan Pérez! Te paso el presupuesto de Hola3D.',
+      '',
+      '*P-0003 · Llaveros y cartel*',
+      '• Llavero con logo × 12: $21.200 ($1.767 c/u)',
+      '• Cartel: $5.000',
+      '',
+      '*Total: $26.200*',
+      '',
+      'Entrega en 5 días.',
+    ].join('\n'));
+    expect(quoteWhatsappMessage({ ...quote, validUntil: null })).toMatch(/\*Total: \$26\.200\*$/);
+  });
+
+  it('writes to the client, or to the recipient of a quote without a client', () => {
+    expect(quoteContact(quote, { phone: '+54 9 11 5555-0142' })).toEqual({ name: 'Café Nube', phone: '+54 9 11 5555-0142' });
+    expect(quoteContact(quickQuote, null)).toEqual({ name: 'Juan Pérez', phone: '+54 9 11 5555-0199' });
+    // Accepted for a client without a phone: the recipient's phone is still the way to reach them.
+    expect(quoteContact({ ...quickQuote, client: 'Juan P.' }, { phone: '' })).toEqual({ name: 'Juan P.', phone: '+54 9 11 5555-0199' });
   });
 
   it('opens the client chat with the message, or WhatsApp without a number when the client has no phone', () => {

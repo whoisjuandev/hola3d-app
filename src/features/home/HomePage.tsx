@@ -5,7 +5,7 @@ import type { DashboardData, DashboardList, DashboardOrder, DashboardQuote, Dash
 import { Icon, type IconName } from '../../ui/Icon';
 import { ErrorBanner, StageChip } from '../orders/components';
 import { dueLabel, money } from '../orders/format';
-import { Validity } from '../quotes/components';
+import { NoClientTag, Validity } from '../quotes/components';
 import { stateLabel } from '../service/format';
 import { grams } from '../spools/format';
 import { fetchDashboard } from './api';
@@ -160,7 +160,7 @@ function QuoteItem({ quote, today }: { quote: DashboardQuote; today: string }) {
     <li>
       <Link to={`/presupuestos/${quote.id}`} className="home-item">
         <span className="home-item__main">
-          <span className="home-item__meta">{quote.number} · {quote.client}</span>
+          <span className="home-item__meta">{quote.number} · {quote.client}{quote.clientId === null && <> <NoClientTag /></>}</span>
           <span className="home-item__title">{quote.title}</span>
           <Validity quote={{ status: 'enviado', validUntil: quote.validUntil }} today={today} />
         </span>

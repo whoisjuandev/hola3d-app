@@ -25,8 +25,9 @@ const task = (overrides: Partial<ServiceTask>): ServiceTask => ({
 });
 
 const quote = (overrides: Partial<Quote>): Quote => ({
-  id: 2, number: 'P-0002', clientId: 8, client: 'Bruno A.', title: 'Casco de cosplay', status: 'enviado', validUntil: '2026-12-06',
-  input: { lines: [] }, result: {} as Quote['result'], total: 124900, note: '', createdAt: stamp, updatedAt: stamp, ...overrides,
+  id: 2, number: 'P-0002', clientId: 8, client: 'Bruno A.', recipientName: '', recipientPhone: '', title: 'Casco de cosplay', status: 'enviado',
+  validUntil: '2026-12-06', showBreakdown: false, input: { lines: [] }, result: {} as Quote['result'], total: 124900, note: '', createdAt: stamp,
+  updatedAt: stamp, ...overrides,
 });
 
 const sources = (overrides: Partial<DashboardSources>): DashboardSources => ({ orders: [], spools: [], tasks: [], quotes: [], ...overrides });
@@ -109,6 +110,15 @@ describe('dashboardData: quotes waiting for an answer', () => {
       id: q.id, number: q.number, clientId: q.clientId, client: q.client, title: q.title, total: q.total, validUntil: q.validUntil, expired: isExpired,
     });
     expect(data.quotesWaiting).toEqual({ count: 3, items: [item(expired, true), item(lastDay, false), item(valid, false)] });
+  });
+
+  it('names the recipient of a quote without a client, and lists one without validity last, never expired', async () => {
+    const quick = quote({ id: 7, number: 'P-0007', clientId: null, client: null, recipientName: 'Juan Pérez', validUntil: null });
+    const data = dashboardData(sources({ quotes: [quick, quote({ id: 2 })] }), '2099-01-01');
+    expect(data.quotesWaiting.items.map((q) => q.id)).toEqual([2, 7]);
+    expect(data.quotesWaiting.items[1]).toEqual({
+      id: 7, number: 'P-0007', clientId: null, client: 'Juan Pérez', title: 'Casco de cosplay', total: 124900, validUntil: null, expired: false,
+    });
   });
 });
 

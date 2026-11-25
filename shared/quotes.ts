@@ -1,6 +1,6 @@
 // Quotes: a calculation saved for a client, with its price frozen. Shared by the Worker API and the React app.
 import type { CalcInput, CalcLineInput, CalcPrinter, CalcResult, CalcSpool, FilamentUseInput } from './calculator';
-import { whatsappUrl } from './clients';
+import { readPhone, whatsappUrl } from './clients';
 import { asBody, isMissing, readText, type Body, type Errors } from './fields';
 import { CHANNELS, type Channel, type NewOrder, type ValidationResult } from './orders';
 import { readProfitChoice } from './profit';
@@ -18,14 +18,21 @@ export const QUOTE_STATUS_LABEL: Record<QuoteStatus, string> = {
 /** How long a new quote is valid by default. */
 export const QUOTE_VALID_DAYS = 15;
 
+/** The statuses a new quote may start in. A quick quote is saved as enviado, as it goes to the recipient at once. */
+export const NEW_QUOTE_STATUSES = ['borrador', 'enviado'] as const;
+export type NewQuoteStatus = (typeof NEW_QUOTE_STATUSES)[number];
+
 export interface Quote {
   id: number;
   number: string; // sequential, shown as "P-0001"
-  clientId: number;
-  client: string; // the client's name, read through the client record
+  clientId: number | null; // null for a quick quote until it is accepted
+  client: string | null; // the client's name, read through the client record; null without a client
+  recipientName: string; // who a quick quote is for, as text; '' for a quote made for a client
+  recipientPhone: string; // the recipient's phone for WhatsApp, as written; '' when not given
   title: string;
   status: QuoteStatus;
-  validUntil: string; // YYYY-MM-DD
+  validUntil: string | null; // YYYY-MM-DD; null means no deadline, so it never expires
+  showBreakdown: boolean; // the print view shows the cost breakdown
   input: CalcInput; // the calculator input as it was saved
   result: CalcResult; // the lines, breakdown and settings as they were priced when saved; never recalculated
   total: number; // whole pesos, result.total
@@ -34,21 +41,31 @@ export interface Quote {
   updatedAt: string;
 }
 
-/** A validated create-quote request. Like an order, it names its client by `clientId` or by `client` (a name). */
+/**
+ * A validated create-quote request. Like an order, it names its client by `clientId` or by `client` (a name); a quick
+ * quote names no client and has `recipientName` instead (the recipient fields are '' when there is a client).
+ */
 export interface NewQuote {
   client: string;
   clientId: number | null;
+  recipientName: string;
+  recipientPhone: string;
   title: string;
-  validUntil: string;
+  validUntil: string | null;
   note: string;
+  showBreakdown: boolean;
+  status: NewQuoteStatus;
   input: CalcInput;
 }
 
 export interface QuoteChanges {
   title: string;
-  validUntil: string;
+  validUntil: string | null;
   note: string;
   status: QuoteStatus;
+  recipientName: string;
+  recipientPhone: string;
+  showBreakdown: boolean;
 }
 
 /** What an accepted quote line becomes: the input of a new order, without its client. */
@@ -96,11 +113,20 @@ export function isCalendarDate(value: unknown): value is string {
   return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
 }
 
-function readValidUntil(body: Body, errors: Errors): string {
+/** The validity date, or null when none is given: a quote without one has no deadline. */
+function readValidUntil(body: Body, errors: Errors): string | null {
   const raw = body.validUntil;
-  if (isMissing(raw)) errors.validUntil = 'Poné hasta qué fecha vale el presupuesto.';
-  else if (!isCalendarDate(raw)) errors.validUntil = 'La fecha tiene que ser AAAA-MM-DD.';
-  return typeof raw === 'string' ? raw : '';
+  if (isMissing(raw)) return null;
+  if (!isCalendarDate(raw)) errors.validUntil = 'La fecha tiene que ser AAAA-MM-DD.';
+  return typeof raw === 'string' ? raw : null;
+}
+
+/** The "Incluir desglose de costos" switch; off when not given. */
+function readShowBreakdown(body: Body, errors: Errors): boolean {
+  const raw = body.showBreakdown;
+  if (raw === undefined || raw === null) return false;
+  if (typeof raw !== 'boolean') errors.showBreakdown = 'Elegí si se incluye el desglose de costos.';
+  return raw === true;
 }
 
 const MAX_LINES = 30;
@@ -181,14 +207,8 @@ export function readCalcInput(raw: unknown): CalcInput | string {
   return typeof profit === 'string' ? profit : { lines: out, profit };
 }
 
-/**
- * Validate a create-quote request. Only the calculator input is read: the server prices it again, so a total
- * or result sent by the browser is ignored. Error messages are shown to the owners as is.
- */
-export function validateNewQuote(input: unknown): ValidationResult<NewQuote> {
-  const errors: Errors = {};
-  const body = asBody(input);
-
+/** The client a request names, by `clientId` or by `client` (a name), as for an order. */
+function readClientReference(body: Body, errors: Errors): { client: string; clientId: number | null } {
   let clientId: number | null = null;
   if (!isMissing(body.clientId)) {
     if (wholeFrom(body.clientId, 1)) clientId = body.clientId;
@@ -196,14 +216,46 @@ export function validateNewQuote(input: unknown): ValidationResult<NewQuote> {
   }
   // A client picked by id needs no name.
   const client = readText(body, errors, 'client', 80, isMissing(body.clientId));
+  return { client: clientId === null ? client : '', clientId };
+}
+
+/**
+ * Validate a create-quote request. It names a client, or (a quick quote) sends `recipientName` and no client. Only the
+ * calculator input is read: the server prices it again, so a total or result sent by the browser is ignored. Error
+ * messages are shown to the owners as is.
+ */
+export function validateNewQuote(input: unknown): ValidationResult<NewQuote> {
+  const errors: Errors = {};
+  const body = asBody(input);
+
+  const quick = isMissing(body.clientId) && isMissing(body.client) && Object.hasOwn(body, 'recipientName');
+  const { client, clientId } = quick ? { client: '', clientId: null } : readClientReference(body, errors);
+  const recipientName = quick ? readText(body, errors, 'recipientName', 80, true) : '';
+  const recipientPhone = quick ? readPhone(body, errors, 'recipientPhone') : '';
   const title = readText(body, errors, 'title', 120, true);
   const validUntil = readValidUntil(body, errors);
   const note = readText(body, errors, 'note', 1000, false);
+  const showBreakdown = readShowBreakdown(body, errors);
+  const status = isMissing(body.status) ? 'borrador' : body.status;
+  if (!(NEW_QUOTE_STATUSES as readonly unknown[]).includes(status)) errors.status = 'Un presupuesto nuevo empieza como borrador o enviado.';
   const calc = readCalcInput(body.input);
   if (typeof calc === 'string') errors.input = calc;
 
   if (Object.keys(errors).length) return { ok: false, errors };
-  return { ok: true, value: { client: clientId === null ? client : '', clientId, title, validUntil, note, input: calc as CalcInput } };
+  return {
+    ok: true,
+    value: {
+      client, clientId, recipientName, recipientPhone, title, validUntil, note, showBreakdown, status: status as NewQuoteStatus, input: calc as CalcInput,
+    },
+  };
+}
+
+/** The client a quote without one is accepted for: picked by `clientId`, or a `client` name (matched or created). */
+export function validateQuoteClient(input: unknown): ValidationResult<{ client: string; clientId: number | null }> {
+  const errors: Errors = {};
+  const value = readClientReference(asBody(input), errors);
+  if (errors.client === 'Completá este dato.') errors.client = 'Elegí el cliente o escribí uno nuevo: los pedidos se crean a su nombre.';
+  return Object.keys(errors).length ? { ok: false, errors } : { ok: true, value };
 }
 
 /** The first piece whose printer or spool is not in the lists, as a message; null when all are there. */
@@ -215,8 +267,11 @@ export function missingReferences(input: CalcInput, printers: Pick<CalcPrinter, 
   return null;
 }
 
-/** Validate the editable fields of a quote (the stored values merged with the request). */
-export function validateQuoteChanges(input: unknown): ValidationResult<QuoteChanges> {
+/**
+ * Validate the editable fields of a quote (the stored values merged with the request). A quote without a client
+ * (`needsRecipient`) must keep a recipient name.
+ */
+export function validateQuoteChanges(input: unknown, needsRecipient: boolean): ValidationResult<QuoteChanges> {
   const errors: Errors = {};
   const body = asBody(input);
   const title = readText(body, errors, 'title', 120, true);
@@ -224,8 +279,11 @@ export function validateQuoteChanges(input: unknown): ValidationResult<QuoteChan
   const note = readText(body, errors, 'note', 1000, false);
   const status = body.status;
   if (!isQuoteStatus(status)) errors.status = 'Ese estado no existe.';
+  const recipientName = readText(body, errors, 'recipientName', 80, needsRecipient);
+  const recipientPhone = readPhone(body, errors, 'recipientPhone');
+  const showBreakdown = readShowBreakdown(body, errors);
   if (Object.keys(errors).length) return { ok: false, errors };
-  return { ok: true, value: { title, validUntil, note, status: status as QuoteStatus } };
+  return { ok: true, value: { title, validUntil, note, status: status as QuoteStatus, recipientName, recipientPhone, showBreakdown } };
 }
 
 /**
@@ -242,9 +300,9 @@ export function canAcceptQuote(status: QuoteStatus): boolean {
   return status === 'borrador' || status === 'enviado';
 }
 
-/** A quote still waiting for an answer (borrador or enviado) whose validity date is before `today`. */
+/** A quote still waiting for an answer (borrador or enviado) whose validity date is before `today`. Never without one. */
 export function isQuoteExpired(quote: Pick<Quote, 'status' | 'validUntil'>, today: string): boolean {
-  return canAcceptQuote(quote.status) && quote.validUntil < today;
+  return canAcceptQuote(quote.status) && quote.validUntil !== null && quote.validUntil < today;
 }
 
 /** The channel the accepted orders came through; WhatsApp when not given. */
@@ -267,22 +325,32 @@ export function ordersFromQuote(quote: Pick<Quote, 'result'>, channel: Channel):
   }));
 }
 
-type MessageQuote = Pick<Quote, 'number' | 'title' | 'client' | 'result' | 'total' | 'validUntil' | 'note'>;
+type MessageQuote = Pick<Quote, 'number' | 'title' | 'client' | 'recipientName' | 'result' | 'total' | 'validUntil' | 'note'>;
 
-/** The ready WhatsApp message: the items, the total and the validity date, then the note if there is one. */
+/**
+ * Who a quote is for and where to write: the client's name, or the recipient written on a quick quote; the client's
+ * phone, or the recipient's when the quote has no client or its client has no phone.
+ */
+export function quoteContact(
+  quote: Pick<Quote, 'client' | 'recipientName' | 'recipientPhone'>, client: { phone: string } | null,
+): { name: string; phone: string } {
+  return { name: quote.client ?? quote.recipientName, phone: client?.phone || quote.recipientPhone };
+}
+
+/** The ready WhatsApp message: the items, the total and the validity date if there is one, then the note if there is one. */
 export function quoteWhatsappMessage(quote: MessageQuote): string {
   const items = quote.result.lines.map((line) => {
     const each = line.quantity > 1 ? ` (${formatPesos(line.unitPrice)} c/u)` : '';
     return `• ${itemLabel(line)}: ${formatPesos(line.total)}${each}`;
   });
   const text = [
-    `¡Hola, ${quote.client}! Te paso el presupuesto de Hola3D.`,
+    `¡Hola, ${quote.client ?? quote.recipientName}! Te paso el presupuesto de Hola3D.`,
     '',
     `*${quote.number} · ${quote.title}*`,
     ...items,
     '',
     `*Total: ${formatPesos(quote.total)}*`,
-    `Válido hasta el ${formatDay(quote.validUntil)}.`,
+    ...(quote.validUntil === null ? [] : [`Válido hasta el ${formatDay(quote.validUntil)}.`]),
   ].join('\n');
   return quote.note ? `${text}\n\n${quote.note}` : text;
 }

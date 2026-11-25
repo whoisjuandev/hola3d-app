@@ -1,4 +1,4 @@
-// The client picker shared by the new-order and save-quote forms: pick a client from the list or type a new name.
+// The client picker shared by the new-order, save-quote and accept-quote forms: pick a client from the list or type a new name.
 import { useEffect, useState } from 'react';
 import type { ClientSummary } from '../../../shared/clients';
 import { findClientByName } from '../../../shared/clients';
@@ -15,8 +15,10 @@ export function usePickerClients(): ClientSummary[] {
   return clients;
 }
 
+export type ClientReference = { clientId: number } | { client: string };
+
 /** A name from the list links that client; any other name creates a new one when the form is saved. */
-export function clientReference(clients: ClientSummary[], text: string): { clientId: number } | { client: string } {
+export function clientReference(clients: ClientSummary[], text: string): ClientReference {
   const picked = findClientByName(clients, text);
   return picked ? { clientId: picked.id } : { client: text };
 }

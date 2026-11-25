@@ -21,13 +21,27 @@ interface Statement {
   params: unknown[];
 }
 
-/** A fresh in-memory database with the migrations applied in order, as a D1Database, and the raw database. */
-export async function sqliteD1(): Promise<{ db: D1Database; sql: SqliteDatabase }> {
+const fileName = (path: string) => path.slice(path.lastIndexOf('/') + 1);
+
+/** The SQL of the migration whose file name starts with `prefix` ("0015"), for a test that applies it by hand. */
+export function migrationSql(prefix: string): string {
+  const path = Object.keys(migrations).find((p) => fileName(p).startsWith(prefix));
+  if (!path) throw new Error(`No migration ${prefix}`);
+  return migrations[path];
+}
+
+/**
+ * A fresh in-memory database with the migrations applied in order, as a D1Database, and the raw database. With
+ * `before`, only the migrations whose file name sorts before it, so a test can add rows and then apply the next one.
+ */
+export async function sqliteD1(options: { before?: string } = {}): Promise<{ db: D1Database; sql: SqliteDatabase }> {
   // Imported by name so the Worker's type check, which has no Node types, does not resolve it.
   const specifier = 'node:sqlite';
   const { DatabaseSync } = (await import(/* @vite-ignore */ specifier)) as SqliteModule;
   const sql = new DatabaseSync(':memory:', { enableForeignKeyConstraints: false });
-  for (const name of Object.keys(migrations).sort()) sql.exec(migrations[name]);
+  for (const path of Object.keys(migrations).sort()) {
+    if (options.before === undefined || fileName(path) < options.before) sql.exec(migrations[path]);
+  }
   sql.exec('PRAGMA foreign_keys = ON'); // as D1, once the migrations have run
 
   const rows = (s: Statement) => sql.prepare(s.query).all(...s.params);

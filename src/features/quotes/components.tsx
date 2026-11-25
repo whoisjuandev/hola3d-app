@@ -1,5 +1,5 @@
 // Presentational pieces of the Presupuestos screens and the calculator's save action.
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useId, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import type { CalcInput, CalcLineResult } from '../../../shared/calculator';
 import type { PricingSettings } from '../../../shared/cost-settings';
@@ -13,11 +13,12 @@ import { changedValues } from '../../ui/forms';
 import { Icon } from '../../ui/Icon';
 import { BreakdownList } from '../calculator/components';
 import { ClientPicker } from '../clients/ClientPicker';
-import { clientReference, usePickerClients } from '../clients/picker';
+import { clientReference, usePickerClients, type ClientReference } from '../clients/picker';
 import { isoDate, money } from '../orders/format';
 import { grams } from '../spools/format';
 import { createQuote } from './api';
 import { defaultQuoteTitle, durationLabel } from './format';
+import { useModal } from './useModal';
 
 const STATUS_COLOR: Record<QuoteStatus, { bg: string; fg: string }> = {
   borrador: { bg: 'var(--rule)', fg: 'var(--ink)' },
@@ -31,23 +32,33 @@ export function QuoteStatusChip({ status }: { status: QuoteStatus }) {
   return <span className="chip" style={{ background: c.bg, color: c.fg }}>{QUOTE_STATUS_LABEL[status]}</span>;
 }
 
-/** "Vale hasta 10/12/2026", red with "vencido" once a quote still waiting for an answer is past it. */
+/** "Vale hasta 10/12/2026", red with "vencido" once a quote still waiting for an answer is past it; "Sin plazo" without a date. */
 export function Validity({ quote, today }: { quote: Pick<Quote, 'status' | 'validUntil'>; today: string }) {
   const expired = isQuoteExpired(quote, today);
   return (
     <span className={expired ? 'quote-validity quote-validity--late' : 'quote-validity'}>
-      <Icon name="calendar" size={14} />Vale hasta {formatDay(quote.validUntil)}{expired ? ' · vencido' : ''}
+      <Icon name="calendar" size={14} />
+      {quote.validUntil === null ? 'Sin plazo' : `Vale hasta ${formatDay(quote.validUntil)}${expired ? ' · vencido' : ''}`}
     </span>
   );
 }
 
-/** One quote in a list, linking to its page. */
+/** The marker next to the recipient's name of a quote that has no client yet. */
+export function NoClientTag() {
+  return <span className="quote-no-client">sin cliente</span>;
+}
+
+/** One quote in a list, linking to its page. A quote without a client shows its recipient's name, marked. */
 export function QuoteRow({ quote, today, showClient }: { quote: Quote; today: string; showClient: boolean }) {
   return (
     <li>
       <Link to={`/presupuestos/${quote.id}`} className="quote-row">
         <span className="quote-row__main">
-          <span className="quote-row__meta">{quote.number}{showClient ? ` · ${quote.client}` : ''} <QuoteStatusChip status={quote.status} /></span>
+          <span className="quote-row__meta">
+            {quote.number}{showClient ? ` · ${quote.client ?? quote.recipientName}` : ''}
+            {showClient && quote.clientId === null && <NoClientTag />}
+            <QuoteStatusChip status={quote.status} />
+          </span>
           <span className="quote-row__title">{quote.title}</span>
           <Validity quote={quote} today={today} />
         </span>
@@ -93,17 +104,6 @@ export function FrozenLine({ line, settings, profit }: { line: CalcLineResult; s
       </details>
     </article>
   );
-}
-
-/** Opens the dialog on mount and closes it on unmount, like the other dialogs. */
-function useModal() {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const dialog = ref.current;
-    dialog?.showModal();
-    return () => dialog?.close();
-  }, []);
-  return ref;
 }
 
 /** Save the calculation as a quote: client, title, validity and a note. The server prices it and freezes it. */
@@ -182,14 +182,21 @@ export function SaveQuoteDialog({ input, total, onClose }: { input: CalcInput; t
   );
 }
 
-/** Confirm the acceptance: shows the orders it creates and asks where the client confirmed. */
+/**
+ * Confirm the acceptance: shows the orders it creates and asks where the client confirmed. A quote without a client
+ * asks for the client first, starting from the recipient's name; a new client is created with the recipient's phone.
+ */
 export function AcceptDialog({ quote, onAccept, onClose }: {
-  quote: Quote; onAccept: (channel: Channel) => Promise<void>; onClose: () => void;
+  quote: Quote; onAccept: (channel: Channel, client?: ClientReference) => Promise<void>; onClose: () => void;
 }) {
   const ref = useModal();
   const uid = useId();
+  const needsClient = quote.clientId === null;
+  const clients = usePickerClients();
+  const [client, setClient] = useState(quote.recipientName);
   const [channel, setChannel] = useState<Channel>('WhatsApp');
   const [banner, setBanner] = useState<string | null>(null);
+  const [clientError, setClientError] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
   const orders = ordersFromQuote(quote, channel);
   const count = `${orders.length} ${orders.length === 1 ? 'pedido' : 'pedidos'}`;
@@ -198,11 +205,14 @@ export function AcceptDialog({ quote, onAccept, onClose }: {
     e.preventDefault();
     setSaving(true);
     setBanner(null);
+    setClientError(undefined);
     try {
-      await onAccept(channel);
+      await onAccept(channel, needsClient ? clientReference(clients, client) : undefined);
       onClose();
     } catch (err) {
-      setBanner((err as Error).message);
+      const apiErr = err as ApiError;
+      setClientError(apiErr.fields?.client ?? apiErr.fields?.clientId);
+      setBanner(apiErr.message);
       setSaving(false);
     }
   }
@@ -215,7 +225,13 @@ export function AcceptDialog({ quote, onAccept, onClose }: {
           <button type="button" className="icon-btn icon-btn--quiet" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button>
         </div>
         {banner && <p className="field__error" role="alert">{banner}</p>}
-        <p>{orders.length === 1 ? 'Se crea' : 'Se crean'} {count} para <b>{quote.client}</b>, en Nuevo, con los precios del presupuesto. Se acepta una sola vez.</p>
+        {needsClient
+          ? <p>{orders.length === 1 ? 'Se crea' : 'Se crean'} {count} para el cliente que elijas, en Nuevo, con los precios del presupuesto. Se acepta una sola vez.</p>
+          : <p>{orders.length === 1 ? 'Se crea' : 'Se crean'} {count} para <b>{quote.client}</b>, en Nuevo, con los precios del presupuesto. Se acepta una sola vez.</p>}
+        {needsClient && (
+          <ClientPicker id={`${uid}-client`} value={client} clients={clients} error={clientError} saving="los pedidos" autoFocus
+            onChange={setClient} />
+        )}
         <ul className="accept-orders">
           {orders.map((o, i) => <li key={i}><span>{o.item}</span><b>{money(o.price)}</b></li>)}
         </ul>
@@ -234,26 +250,41 @@ export function AcceptDialog({ quote, onAccept, onClose }: {
   );
 }
 
-const EDIT_FIELDS: FieldSpec[] = [
-  { key: 'title', label: 'Título' },
-  { key: 'validUntil', label: 'Válido hasta', type: 'date' },
-  { key: 'note', label: 'Nota para el cliente', type: 'textarea', hint: 'Sale en el PDF y en el mensaje de WhatsApp.' },
+const RECIPIENT_FIELDS: FieldSpec[] = [
+  { key: 'recipientName', label: 'Para (nombre)' },
+  { key: 'recipientPhone', label: 'Teléfono para WhatsApp (opcional)', inputMode: 'tel' },
 ];
 
-/** Edit the title, validity and note, sending only what changed. The prices stay as they were saved. */
+const EDIT_FIELDS: FieldSpec[] = [
+  { key: 'title', label: 'Título' },
+  { key: 'validUntil', label: 'Válido hasta', type: 'date', hint: 'Vacío: sin plazo.' },
+  { key: 'note', label: 'Nota para el cliente', type: 'textarea', hint: 'Sale en el PDF y en el mensaje de WhatsApp.' },
+  { key: 'showBreakdown', label: 'Incluir desglose de costos', type: 'checkbox', hint: 'El PDF muestra el costo de cada pieza y la ganancia.' },
+];
+
+/**
+ * Edit the title, validity, note and the breakdown switch (and the recipient of a quote without a client), sending only
+ * what changed. The prices stay as they were saved.
+ */
 export function EditQuoteDialog({ quote, onSave, onClose }: {
   quote: Quote; onSave: (changes: Record<string, unknown>) => Promise<unknown>; onClose: () => void;
 }) {
-  const initial = { title: quote.title, validUntil: quote.validUntil, note: quote.note };
+  const quick = quote.clientId === null;
+  const initial: Record<string, string> = {
+    ...(quick ? { recipientName: quote.recipientName, recipientPhone: quote.recipientPhone } : {}),
+    title: quote.title, validUntil: quote.validUntil ?? '', note: quote.note, showBreakdown: String(quote.showBreakdown),
+  };
   return (
     <FormDialog
       title={`Editar ${quote.number}`}
-      fields={EDIT_FIELDS}
+      fields={quick ? [...RECIPIENT_FIELDS, ...EDIT_FIELDS] : EDIT_FIELDS}
       initial={initial}
       submitLabel="Guardar cambios"
       onClose={onClose}
       onSubmit={async (values) => {
-        const changes = changedValues(values, initial);
+        const { validUntil, showBreakdown, ...changes }: Record<string, unknown> = changedValues(values, initial);
+        if (validUntil !== undefined) changes.validUntil = validUntil || null;
+        if (showBreakdown !== undefined) changes.showBreakdown = showBreakdown === 'true';
         if (Object.keys(changes).length) await onSave(changes);
       }}
     />

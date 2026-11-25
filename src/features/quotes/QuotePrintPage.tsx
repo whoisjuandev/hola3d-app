@@ -1,7 +1,10 @@
 // The quote as the client sees it, outside the app shell, for the browser to print or save as PDF.
-// It shows items, quantities, prices, total, validity and the note; never costs, margin or the breakdown.
+// It shows items, quantities, prices, total, validity (when it has one) and the note. Costs and profit only when the
+// quote's "Incluir desglose de costos" switch is on: then each piece's cost breakdown, the total cost and the profit.
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
+import { BREAKDOWN_TERMS, type CalcResult } from '../../../shared/calculator';
+import { profitLabel, resultProfit } from '../../../shared/profit';
 import type { Quote } from '../../../shared/quotes';
 import { formatDay } from '../../../shared/quotes';
 import { Icon } from '../../ui/Icon';
@@ -74,7 +77,7 @@ function QuoteDocument({ quote }: { quote: Quote }) {
 
       <section className="quote-doc__client">
         <span className="quote-doc__label">Para</span>
-        <p className="quote-doc__client-name">{quote.client}</p>
+        <p className="quote-doc__client-name">{quote.client ?? quote.recipientName}</p>
         <p className="quote-doc__title">{quote.title}</p>
       </section>
 
@@ -105,12 +108,44 @@ function QuoteDocument({ quote }: { quote: Quote }) {
         </tfoot>
       </table>
 
-      <p className="quote-doc__validity">Válido hasta el <b>{formatDay(quote.validUntil)}</b>.</p>
+      {quote.validUntil !== null && <p className="quote-doc__validity">Válido hasta el <b>{formatDay(quote.validUntil)}</b>.</p>}
       {quote.note && <p className="quote-doc__note">{quote.note}</p>}
+      {quote.showBreakdown && <CostBreakdown result={quote.result} />}
 
       <footer className="quote-doc__foot">
         <span className="hand">¡Gracias por elegir Hola3D!</span>
       </footer>
     </article>
+  );
+}
+
+/** The cost terms of a piece, up to its production cost: what the price is made of before the profit. */
+const COST_TERMS = BREAKDOWN_TERMS.slice(0, BREAKDOWN_TERMS.findIndex((t) => t.key === 'productionCost') + 1);
+
+/** Each piece's costs, then the total production cost and the profit, as the quote froze them. */
+function CostBreakdown({ result }: { result: CalcResult }) {
+  return (
+    <section className="quote-doc__costs" aria-labelledby="desglose">
+      <h2 id="desglose" className="quote-doc__label">Desglose de costos</h2>
+      <div className="quote-doc__pieces">
+        {result.lines.map((line, i) => (
+          <div key={i} className="quote-doc__piece">
+            <p className="quote-doc__piece-name">{line.name}{line.quantity > 1 ? ` × ${line.quantity}` : ''}</p>
+            <dl>
+              {COST_TERMS.map((t) => (
+                <div key={t.key} className={t.total ? 'quote-doc__cost quote-doc__cost--total' : 'quote-doc__cost'}>
+                  <dt>{t.label}</dt>
+                  <dd>{money(line.breakdown[t.key])}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ))}
+      </div>
+      <dl className="quote-doc__cost-totals">
+        <div className="quote-doc__cost"><dt>Costo de producción total</dt><dd>{money(result.breakdown.productionCost)}</dd></div>
+        <div className="quote-doc__cost"><dt>Ganancia ({profitLabel(resultProfit(result))})</dt><dd>{money(result.breakdown.profit)}</dd></div>
+      </dl>
+    </section>
   );
 }

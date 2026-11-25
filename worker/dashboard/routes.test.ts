@@ -35,8 +35,9 @@ const lavender: Spool = {
   lowStockGrams: 150, note: '', createdAt: stamp, updatedAt: stamp,
 };
 const helmet: Quote = {
-  id: 2, number: 'P-0002', clientId: 8, client: 'Bruno A.', title: 'Casco de cosplay', status: 'enviado', validUntil: '2026-12-06',
-  input: { lines: [] }, result: {} as Quote['result'], total: 124900, note: '', createdAt: stamp, updatedAt: stamp,
+  id: 2, number: 'P-0002', clientId: 8, client: 'Bruno A.', recipientName: '', recipientPhone: '', title: 'Casco de cosplay', status: 'enviado',
+  validUntil: '2026-12-06', showBreakdown: false, input: { lines: [] }, result: {} as Quote['result'], total: 124900, note: '', createdAt: stamp,
+  updatedAt: stamp,
 };
 
 function setup(orders: Order[], spools: Spool[] = [lavender]) {

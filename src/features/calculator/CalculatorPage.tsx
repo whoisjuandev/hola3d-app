@@ -11,6 +11,7 @@ import { ErrorBanner } from '../orders/components';
 import { money } from '../orders/format';
 import { fetchPrinters } from '../printers/api';
 import { SaveQuoteDialog } from '../quotes/components';
+import { QuickQuoteDialog } from '../quotes/QuickQuoteDialog';
 import { fetchSpools } from '../spools/api';
 import { fetchCostSettings, updateCostSettings } from './api';
 import { CopySummary, LineEditor, ProfitPicker, SettingsDialog, Summary } from './components';
@@ -94,7 +95,7 @@ function Calculator({ printers, spools, settings }: { printers: Printer[]; spool
   const defaultSpool = (spools.find((s) => s.remainingGrams > 0) ?? spools[0])?.id ?? null;
   const [lines, setLines] = useState<LineDraft[]>(() => [newLine(1, { printerId: defaultPrinter, spoolId: defaultSpool, packaging: settings.packagingCost })]);
   const [profit, setProfit] = useState(() => newProfitDraft(settings));
-  const [saving, setSaving] = useState(false);
+  const [dialog, setDialog] = useState<'save' | 'quick' | null>(null);
 
   const choice = useMemo(() => toProfitChoice(profit, settings), [profit, settings]);
   const input = useMemo(() => ({ ...toCalcInput(lines), profit: choice }), [lines, choice]);
@@ -144,13 +145,15 @@ function Calculator({ printers, spools, settings }: { printers: Printer[]; spool
 
         <aside className="calc__aside">
           <Summary result={result} settings={settings} />
-          <button type="button" className="btn btn--block" onClick={() => setSaving(true)}><Icon name="quote" />Guardar como presupuesto</button>
+          <button type="button" className="btn btn--block" onClick={() => setDialog('save')}><Icon name="quote" />Guardar como presupuesto</button>
           <p className="muted calc__note">Queda guardado para un cliente con el precio de hoy, listo para imprimir o mandar por WhatsApp.</p>
+          <button type="button" className="btn btn--ghost btn--block" onClick={() => setDialog('quick')}><Icon name="chat" />Cotización rápida</button>
           <CopySummary text={calculationSummary(result)} />
         </aside>
       </div>
 
-      {saving && <SaveQuoteDialog input={input} total={result.total} onClose={() => setSaving(false)} />}
+      {dialog === 'save' && <SaveQuoteDialog input={input} total={result.total} onClose={() => setDialog(null)} />}
+      {dialog === 'quick' && <QuickQuoteDialog input={input} total={result.total} onClose={() => setDialog(null)} />}
 
       <a href="#precio" className="calc__bar" aria-label={`Total ${money(result.total)}, ver el detalle`}>
         <span>Total</span>
