@@ -13,10 +13,10 @@ export function OrdersPage() {
   const isPhone = useMediaQuery(PHONE_QUERY);
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<StageTab>('activos');
-  // `?pedido=0142` (from Calendario) opens that order's detail.
+  // `?pedido=0142` (from Calendario and Inicio) opens that order's detail; `?nuevo=1` (from Inicio) the new order form.
   const [params, setParams] = useSearchParams();
   const [selectedId, setSelectedId] = useState<string | null>(() => params.get('pedido'));
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(() => params.get('nuevo') === '1');
   const [today] = useState(() => isoDate(new Date()));
 
   const found = useMemo(() => orders.filter((o) => matchesSearch(o, query)), [orders, query]);
@@ -26,6 +26,10 @@ export function OrdersPage() {
   const close = useCallback(() => {
     setSelectedId(null);
     if (params.has('pedido')) setParams({}, { replace: true });
+  }, [params, setParams]);
+  const closeNew = useCallback(() => {
+    setCreating(false);
+    if (params.has('nuevo')) setParams({}, { replace: true });
   }, [params, setParams]);
 
   return (
@@ -93,7 +97,7 @@ export function OrdersPage() {
       )}
 
       {lastChange && <UndoToast text={lastChange.text} onUndo={() => void undo()} onDismiss={dismissChange} />}
-      {creating && <NewOrderDialog onCreate={async (input) => { const o = await create(input); setSelectedId(o.id); return o; }} onClose={() => setCreating(false)} />}
+      {creating && <NewOrderDialog onCreate={async (input) => { const o = await create(input); setSelectedId(o.id); return o; }} onClose={closeNew} />}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { workshopToday } from '../shared/service';
 import { handleCalendar } from './calendar/routes';
 import { handleClients } from './clients/routes';
+import { handleDashboard } from './dashboard/routes';
 import { d1ClientRepository } from './clients/repository';
 import { problem } from './http';
 import { handleOrders } from './orders/routes';
@@ -48,6 +49,13 @@ const HANDLERS: Handler[] = [
     projects: d1ProjectRepository(env.DB),
     service: d1ServiceRepository(env.DB),
     jobs: d1PrintJobRepository(env.DB),
+    today,
+  }),
+  (request, url, env) => handleDashboard(request, url, {
+    orders: d1OrderRepository(env.DB),
+    spools: d1SpoolRepository(env.DB),
+    service: d1ServiceRepository(env.DB),
+    quotes: d1QuoteRepository(env.DB),
     today,
   }),
   (request, url, env) => handleSpools(request, url, d1SpoolRepository(env.DB)),

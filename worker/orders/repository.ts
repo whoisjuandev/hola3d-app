@@ -50,6 +50,7 @@ interface OrderRow {
   note: string;
   created_at: string;
   updated_at: string;
+  delivered_at: string | null;
 }
 
 /** The order with its real cost (from its print jobs) and real profit; both null while it has no printed job. */
@@ -78,6 +79,7 @@ function toOrder(row: OrderRow): ReadOrder {
     note: row.note,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    deliveredAt: row.delivered_at,
   };
 }
 
@@ -170,9 +172,15 @@ export function d1OrderRepository(db: D1Database): OrderRepository {
     },
 
     async setStage(id, stage) {
+      // Delivering stamps the moment (keeping the first one if it was already delivered); any other stage clears it.
+      const now = new Date().toISOString();
       const row = await db
-        .prepare('UPDATE orders SET stage = ?, updated_at = ? WHERE id = ? RETURNING id')
-        .bind(stage, new Date().toISOString(), id)
+        .prepare(
+          `UPDATE orders SET stage = ?, updated_at = ?,
+             delivered_at = CASE WHEN ? = 'entregado' THEN COALESCE(delivered_at, ?) ELSE NULL END
+           WHERE id = ? RETURNING id`,
+        )
+        .bind(stage, now, stage, now, id)
         .first<{ id: string }>();
       return row ? get(row.id) : null;
     },
@@ -204,6 +212,7 @@ export function memoryInsertOrder(
   const now = new Date().toISOString();
   const order: StoredOrder = {
     ...input, id: formatOrderNumber(max + 1), client: '', clientId, quoteId, projectId, stage: 'nuevo', paid: false, createdAt: now, updatedAt: now,
+    deliveredAt: null,
   };
   tables.orders.set(order.id, order);
   return memoryReadOrder(tables, order);
@@ -238,7 +247,9 @@ export function memoryOrderRepository(tables: MemoryTables): OrderRepository {
     async setStage(id, stage) {
       const current = orders.get(id);
       if (!current) return null;
-      const updated = { ...current, stage, updatedAt: new Date().toISOString() };
+      const now = new Date().toISOString();
+      const deliveredAt = stage === 'entregado' ? current.deliveredAt ?? now : null;
+      const updated = { ...current, stage, updatedAt: now, deliveredAt };
       orders.set(id, updated);
       return read(updated);
     },

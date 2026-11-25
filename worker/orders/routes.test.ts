@@ -17,7 +17,7 @@ const cafe: Client = {
 const base: Order = {
   id: '0142', item: 'Llaveros con logo × 12', client: 'Café Nube', clientId: 1, quoteId: null, projectId: null, project: null, channel: 'Instagram', stage: 'imprimiendo',
   dueDate: '2026-11-23', dueTime: null, price: 36000, deposit: 18000, paid: false, material: 'PLA', note: '',
-  createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z', realCost: null, realProfit: null,
+  createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z', deliveredAt: null, realCost: null, realProfit: null,
 };
 
 function call(method: string, path: string, body?: unknown) {
@@ -89,7 +89,7 @@ describe('POST /api/orders', () => {
     const { run, repo } = call('POST', '/api/orders', { ...newOrder, client: 'Lucía M.' });
     const { status, body } = await read(await run());
     expect(status).toBe(201);
-    expect(body.order).toMatchObject({ id: '0143', stage: 'nuevo', client: 'Lucía M.', price: 12000, deposit: null });
+    expect(body.order).toMatchObject({ id: '0143', stage: 'nuevo', client: 'Lucía M.', price: 12000, deposit: null, deliveredAt: null });
     expect(await repo.get('0143')).not.toBeNull();
   });
 
@@ -166,6 +166,50 @@ describe('PUT /api/orders/:id/stage', () => {
     expect(status).toBe(200);
     expect((body.order as Order).stage).toBe('listo');
     expect((await repo.get('10000'))?.stage).toBe('listo');
+  });
+
+  it('stamps deliveredAt when an order moves to entregado', async () => {
+    const before = new Date().toISOString();
+    const { run, repo } = call('PUT', '/api/orders/0142/stage', { stage: 'entregado' });
+    const { status, body } = await read(await run());
+    const after = new Date().toISOString();
+    expect(status).toBe(200);
+    const deliveredAt = (body.order as Order).deliveredAt as string;
+    expect(deliveredAt >= before && deliveredAt <= after).toBe(true);
+    expect(body.order).toMatchObject({ stage: 'entregado', updatedAt: deliveredAt });
+    expect(await repo.get('0142')).toMatchObject({ stage: 'entregado', deliveredAt });
+  });
+
+  it('keeps the first deliveredAt when a delivered order is moved to entregado again', async () => {
+    const tables = memoryTables([cafe], [{ ...base, stage: 'entregado', deliveredAt: '2026-11-20T15:00:00.000Z' }]);
+    const repo = memoryOrderRepository(tables);
+    const url = new URL('https://app.test/api/orders/0142/stage');
+    const request = new Request(url, { method: 'PUT', body: JSON.stringify({ stage: 'entregado' }) });
+    const { status, body } = await read(await handleOrders(request, url, repo, memoryClientRepository(tables), memoryProjectRepository(tables)));
+    expect(status).toBe(200);
+    expect(body.order).toMatchObject({ stage: 'entregado', deliveredAt: '2026-11-20T15:00:00.000Z' });
+    expect(await repo.get('0142')).toMatchObject({ deliveredAt: '2026-11-20T15:00:00.000Z' });
+  });
+
+  it('clears deliveredAt when a delivered order moves back', async () => {
+    const tables = memoryTables([cafe], [{ ...base, stage: 'entregado', deliveredAt: '2026-11-20T15:00:00.000Z' }]);
+    const repo = memoryOrderRepository(tables);
+    const url = new URL('https://app.test/api/orders/0142/stage');
+    const request = new Request(url, { method: 'PUT', body: JSON.stringify({ stage: 'listo' }) });
+    const { status, body } = await read(await handleOrders(request, url, repo, memoryClientRepository(tables), memoryProjectRepository(tables)));
+    expect(status).toBe(200);
+    expect(body.order).toMatchObject({ stage: 'listo', deliveredAt: null });
+    expect(await repo.get('0142')).toMatchObject({ stage: 'listo', deliveredAt: null });
+  });
+
+  it('leaves deliveredAt as it was when the stage is rejected', async () => {
+    const tables = memoryTables([cafe], [{ ...base, stage: 'entregado', deliveredAt: '2026-11-20T15:00:00.000Z' }]);
+    const repo = memoryOrderRepository(tables);
+    const url = new URL('https://app.test/api/orders/0142/stage');
+    const request = new Request(url, { method: 'PUT', body: JSON.stringify({ stage: 'volando' }) });
+    const { status } = await read(await handleOrders(request, url, repo, memoryClientRepository(tables), memoryProjectRepository(tables)));
+    expect(status).toBe(422);
+    expect(await repo.get('0142')).toMatchObject({ stage: 'entregado', deliveredAt: '2026-11-20T15:00:00.000Z' });
   });
 
   it('answers 404 for an order that does not exist', async () => {

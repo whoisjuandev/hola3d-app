@@ -33,6 +33,7 @@ export interface Order {
   note: string;
   createdAt: string;
   updatedAt: string;
+  deliveredAt: string | null; // ISO timestamp of the move to entregado; null while not delivered
   realCost: number | null; // whole pesos, from the order's print jobs (failed ones included); null while it has none
   realProfit: number | null; // price minus real cost; null while there is no real cost
 }

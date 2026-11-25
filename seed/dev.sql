@@ -1,5 +1,8 @@
 -- Sample clients, projects, quotes, orders, printers, spools, print jobs (logged and planned), service tasks and logs, and cost settings for local
 -- development only (npm run db:seed). Never run against production. Contact details are made up.
+-- As of 2026-11-25 the home screen has something in every block: order 0145 is due today, 0141, 0142 and 0143 are late,
+-- Lavanda and Dorado silk are low, three service tasks are due, P-0002 waits for an answer, and 0140 was delivered this
+-- month with its real cost.
 DELETE FROM service_logs;
 DELETE FROM service_tasks;
 DELETE FROM print_job_filaments;
@@ -52,6 +55,10 @@ INSERT INTO orders (id, item, client, client_id, channel, stage, due_date, due_t
 
 -- Order 0142 is the accepted quote P-0001 (one line, at its frozen price).
 UPDATE orders SET quote_id = 1 WHERE id = '0142';
+
+-- The dragon figure was delivered on the 17th: with its print jobs below, the home screen shows November's revenue and
+-- real profit (18000 − 16650).
+UPDATE orders SET delivered_at = '2026-11-17T12:00:00Z' WHERE id = '0140';
 
 -- The robotics pieces are the Kit robótica project; the dragon figure is the finished project.
 UPDATE orders SET project_id = 1 WHERE id = '0144';

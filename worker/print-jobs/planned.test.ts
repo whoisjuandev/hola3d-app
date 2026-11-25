@@ -19,7 +19,7 @@ const cafe: Client = { id: 1, name: 'Café Nube', phone: '', instagram: '', emai
 const keychains: Order = {
   id: '0142', item: 'Llaveros con logo × 12', client: 'Café Nube', clientId: 1, quoteId: null, projectId: null, project: null, channel: 'Instagram', stage: 'imprimiendo',
   dueDate: null, dueTime: null, price: 36000, deposit: null, paid: false, material: '', note: '', createdAt: stamp, updatedAt: stamp,
-  realCost: null, realProfit: null,
+  deliveredAt: null, realCost: null, realProfit: null,
 };
 const pot: Order = { ...keychains, id: '0143', item: 'Maceta', price: 12000 };
 

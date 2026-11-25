@@ -16,7 +16,7 @@ const school: Client = { ...cafe, id: 5, name: 'Escuela N.º 12' };
 const order = (overrides: Partial<Order>): Order => ({
   id: '0144', item: 'Piezas de robótica × 30', client: 'Escuela N.º 12', clientId: 5, quoteId: null, projectId: null, project: null,
   channel: 'Email', stage: 'disenando', dueDate: '2026-11-27', dueTime: null, price: 96000, deposit: 48000, paid: false, material: 'PETG',
-  note: '', createdAt: stamp, updatedAt: stamp, realCost: null, realProfit: null, ...overrides,
+  note: '', createdAt: stamp, updatedAt: stamp, deliveredAt: null, realCost: null, realProfit: null, ...overrides,
 });
 
 // Kit: 0144 (designing, $96000, deposit 48000) and 0147 (delivered, paid, $30000). 0148 is the school's, with no project.

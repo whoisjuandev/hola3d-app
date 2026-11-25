@@ -18,7 +18,7 @@ const school: Client = { ...cafe, id: 5, name: 'Escuela N.º 12' };
 const order = (overrides: Partial<Order>): Order => ({
   id: '0142', item: 'Llaveros con logo × 12', client: 'Café Nube', clientId: 3, quoteId: null, projectId: null, project: null, channel: 'Instagram',
   stage: 'imprimiendo', dueDate: '2026-11-23', dueTime: null, price: 36000, deposit: null, paid: false, material: '', note: '',
-  createdAt: stamp, updatedAt: stamp, realCost: null, realProfit: null, ...overrides,
+  createdAt: stamp, updatedAt: stamp, deliveredAt: null, realCost: null, realProfit: null, ...overrides,
 });
 const orders = [
   order({}),

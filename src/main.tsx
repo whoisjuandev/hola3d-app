@@ -8,6 +8,7 @@ import { CalculatorPage } from './features/calculator/CalculatorPage';
 import { CalendarPage } from './features/calendar/CalendarPage';
 import { ClientPage } from './features/clients/ClientPage';
 import { ClientsPage } from './features/clients/ClientsPage';
+import { HomePage } from './features/home/HomePage';
 import { OrdersPage } from './features/orders/OrdersPage';
 import { PrintersPage } from './features/printers/PrintersPage';
 import { ProjectPage } from './features/projects/ProjectPage';
@@ -24,7 +25,7 @@ const router = createBrowserRouter([
     path: '/',
     element: <AppShell />,
     children: [
-      { index: true, element: <ComingSoon title="¡Hola!" /> },
+      { index: true, element: <HomePage /> },
       { path: 'pedidos', element: <OrdersPage /> },
       { path: 'clientes', element: <ClientsPage /> },
       { path: 'clientes/:id', element: <ClientPage /> },

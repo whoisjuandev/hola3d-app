@@ -17,7 +17,7 @@ The internal workshop app for Hola3D, a 3D printing shop. It tracks every order 
 | Calculadora (calculator) | Prices one or more pieces with the real cost breakdown, total and price per unit, live. Edits the workshop costs. Saves the calculation as a quote for a client |
 | Presupuestos (quotes) | List with status filter and totals. Quote page with the frozen lines and breakdown; mark sent, accept into orders, reject, print view for PDF, WhatsApp message. Client pages list their quotes; orders link back to their quote |
 | Calendario (calendar) | Month and week views with previous, next and "Hoy". The month shows each day's due orders, project due dates, service tasks due by date and planned prints as small labels by type (with "+N más" when they do not fit); a day opens its week. The week shows due orders (late ones in red), projects and service at the top, and below one row per active printer with its planned prints placed by start time and length; a day of a printer's row plans a print there, and a print opens its plan to change or delete it. Orders open their detail in Pedidos, projects their page, service tasks Servicio técnico. On a phone the week is a list of days |
-| Inicio | Placeholder screen |
+| Inicio (home) | Greeting with today's date and quick actions (new order, price calculator, plan a print). One card per list, most urgent first: late orders, orders due today, service tasks due, low spools and sent quotes waiting for an answer, each with its count, its first five items, a friendly empty state and a link to its section; then this month's revenue and real profit, marked partial when delivered orders have no print jobs logged yet. `/pedidos?nuevo=1` opens the new order form and `/agenda?planificar=1` the plan dialog |
 | Deploy to `app.hola3d.com.ar` | Not done yet, see [Deploy](#deploy) |
 
 The app has no login of its own. It is meant to run behind Cloudflare Access, so do not deploy it without that step.
@@ -49,11 +49,11 @@ One Cloudflare Worker serves both the React app and the API, and stores data in 
 
 | Folder | What lives there |
 |---|---|
-| `src/` | React 19 app (Vite, React Router). One folder per screen in `features/` (`orders/` is Pedidos, `clients/` Clientes, `printers/` Impresoras, `spools/` Filamento, `calculator/` Calculadora, `quotes/` Presupuestos and the quote print view, `service/` Servicio técnico, `projects/` Proyectos and the project page, `calendar/` Calendario and the plan-a-print dialog), `shell/` the navigation, `ui/` pieces the screens share (API calls, form dialog, icons) |
-| `worker/` | The Worker: API under `/api/*`, everything else is the single-page app. One folder per module (`orders/`, `print-jobs/` (logged and planned jobs), `calendar/` (reads the other modules' ports, no storage of its own), `clients/`, `projects/`, `printers/`, `spools/`, `settings/`, `quotes/`, `service/`) with its routes and a storage port with a D1 and an in-memory adapter (the in-memory adapters share tables, `memory.ts`, where they read each other's rows); `index.ts` tries each module in turn |
-| `shared/` | Rules used by both sides: order stages, validation and search; client validation, name matching, total spent, balance owed and contact links; printer validation, hours and wear cost; spool validation, low stock, material filter and stock totals; cost settings validation and defaults; the cost formula and spool shortages for the calculator; quote validation, status rules, the orders a quote becomes and its WhatsApp message; print job validation, the cost of one job and the real cost of an order from its jobs' stored costs; service task and log validation, when a task is due and how much is left, the due-first order, the default plan and the service cost per printer; project validation, progress, totals, when a project is overdue and the one-client rule for its orders; the calendar's dates, ranges, overlap of planned prints, when a service task is due by date, and what falls in a range |
+| `src/` | React 19 app (Vite, React Router). One folder per screen in `features/` (`home/` is Inicio, `orders/` is Pedidos, `clients/` Clientes, `printers/` Impresoras, `spools/` Filamento, `calculator/` Calculadora, `quotes/` Presupuestos and the quote print view, `service/` Servicio técnico, `projects/` Proyectos and the project page, `calendar/` Calendario and the plan-a-print dialog), `shell/` the navigation, `ui/` pieces the screens share (API calls, form dialog, icons) |
+| `worker/` | The Worker: API under `/api/*`, everything else is the single-page app. One folder per module (`orders/`, `print-jobs/` (logged and planned jobs), `calendar/` and `dashboard/` (read the other modules' ports, no storage of their own), `clients/`, `projects/`, `printers/`, `spools/`, `settings/`, `quotes/`, `service/`) with its routes and a storage port with a D1 and an in-memory adapter (the in-memory adapters share tables, `memory.ts`, where they read each other's rows); `index.ts` tries each module in turn |
+| `shared/` | Rules used by both sides: order stages, validation and search; client validation, name matching, total spent, balance owed and contact links; printer validation, hours and wear cost; spool validation, low stock, material filter and stock totals; cost settings validation and defaults; the cost formula and spool shortages for the calculator; quote validation, status rules, the orders a quote becomes and its WhatsApp message; print job validation, the cost of one job and the real cost of an order from its jobs' stored costs; service task and log validation, when a task is due and how much is left, the due-first order, the default plan and the service cost per printer; project validation, progress, totals, when a project is overdue and the one-client rule for its orders; the calendar's dates, ranges, overlap of planned prints, when a service task is due by date, and what falls in a range; the home screen's lists and month totals |
 | `migrations/` | D1 schema, one file per change |
-| `seed/` | Sample clients, projects, quotes, orders, printers, spools, print jobs (logged, and planned in this week and the next), service tasks and logs, and cost settings, for local use only |
+| `seed/` | Sample clients, projects, quotes, orders (one delivered this month), printers, spools, print jobs (logged, and planned in this week and the next), service tasks and logs, and cost settings, for local use only. As of 2026-11-25 every block of the home screen has something in it |
 
 An order moves through five stages, in order:
 
@@ -63,9 +63,9 @@ An order moves through five stages, in order:
 
 | Method | Path | What it does |
 |---|---|---|
-| GET | `/api/orders` | List all orders. Each one has `client` (the client's name), `clientId`, `quoteId` (the quote it was accepted from, or null), `projectId` and `project` (its project's id and name, or null), and `realCost` and `realProfit` (from its print jobs; null while it has none) |
+| GET | `/api/orders` | List all orders. Each one has `client` (the client's name), `clientId`, `quoteId` (the quote it was accepted from, or null), `projectId` and `project` (its project's id and name, or null), `realCost` and `realProfit` (from its print jobs; null while it has none), and `deliveredAt` (when it moved to `entregado`; null while not delivered) |
 | POST | `/api/orders` | Create an order. It starts in `nuevo` and takes the next number, padded to four digits. With `projectId`, it goes in that project |
-| PUT | `/api/orders/:id/stage` | Move an order to another stage |
+| PUT | `/api/orders/:id/stage` | Move an order to another stage. Moving to `entregado` stamps `deliveredAt` (moving there again keeps the first stamp); any other stage clears it |
 | PUT | `/api/orders/:id/project` | Put the order in a project of its client with `{"projectId": 3}`, or take it out of any with `{"projectId": null}` |
 | GET | `/api/orders/:id/jobs` | The order's print jobs, oldest first, each with its stored `cost`, and `cost`: the order's real cost term by term (null without jobs) |
 | POST | `/api/orders/:id/jobs` | Log a finished print job: store it with its cost, add its minutes to the printer and take its grams off each spool, in one atomic write. Answers the job and the order |
@@ -75,6 +75,7 @@ An order moves through five stages, in order:
 | PUT | `/api/orders/:id/jobs/:jobId` | Change a planned job's `printerId`, `plannedStart`, `estimatedMinutes` or `note`. Send only the fields to change: only those are written. 409 for a finished job |
 | POST | `/api/orders/:id/jobs/:jobId/finish` | Finish a planned job with the body of a log: store its cost, add its minutes and take its grams off, in one atomic write. Answers the job and the order; 409 once it is finished, or when it moved to another printer while finishing |
 | GET | `/api/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD` | For those days (both included, up to 92): `orders` due (with stage, client, project and `overdue`), `projects` due, `serviceTasks` that become due by date, and `plannedJobs` with printer, order, `start` and `end`; and `today` |
+| GET | `/api/dashboard` | The home screen: `dueToday` and `overdue` orders, `lowSpools`, `serviceDue` tasks and `quotesWaiting`, each as `{ count, items }` with at most five items; `month` with `revenue`, `deliveredCount`, `realProfit` and `withoutRealCost`; and `today` |
 | GET | `/api/clients` | List clients, by name, each with `orderCount`, `totalSpent` and `balanceOwed` |
 | POST | `/api/clients` | Create a client |
 | GET | `/api/clients/:id` | One client with its totals, and its `orders` |
@@ -239,6 +240,14 @@ curl -X POST http://localhost:5173/api/orders/0142/jobs/6/finish \
 
 # What falls in the week of 23 November
 curl 'http://localhost:5173/api/calendar?from=2026-11-23&to=2026-11-29'
+```
+
+### Home
+
+`GET /api/dashboard` reads the orders, spools, service tasks and quotes and keeps, on the workshop's date (Buenos Aires, as for the calendar): orders due today that are not delivered, by time with untimed ones last; late orders (not delivered and due before today, so an order due today is not late), oldest first, with `daysLate`; spools at or below their threshold, the lowest share of their net weight first; active service tasks that are due, the most overdue first, with their `state`; and quotes in `enviado`, by validity date, with `expired` once that date has passed. Each list keeps its first five items and its full `count`. `month` adds up the orders delivered this month: `revenue` is the sum of their prices, `realProfit` the sum of the real profit (S7) of those that have a real cost, and `withoutRealCost` counts the ones that do not yet, so the screen can say the profit is partial. "This month" reads `deliveredAt` on the workshop's clock, so an order delivered at 23:30 on the last day of a month counts in that month. Migration `0011` added `delivered_at` and filled it for the orders already delivered from their last change. The rules are `dashboardData` in `shared/dashboard.ts`.
+
+```bash
+curl http://localhost:5173/api/dashboard
 ```
 
 ## Deploy

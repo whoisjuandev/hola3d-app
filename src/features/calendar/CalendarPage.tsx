@@ -36,7 +36,8 @@ export function CalendarPage() {
   const key = `${range.from}/${range.to}`;
   const [state, setState] = useState<State>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
-  const [dialog, setDialog] = useState<Dialog | null>(null);
+  // `?planificar=1` (from Inicio) opens the plan dialog on today.
+  const [dialog, setDialog] = useState<Dialog | null>(() => (params.get('planificar') === '1' ? { date: today } : null));
 
   useEffect(() => {
     let alive = true;
@@ -105,7 +106,10 @@ export function CalendarPage() {
           orderLink
           onSaved={reload}
           onDeleted={reload}
-          onClose={() => setDialog(null)}
+          onClose={() => {
+            setDialog(null);
+            if (params.has('planificar')) setParams({ vista: view, dia: anchor }, { replace: true });
+          }}
         />
       )}
     </div>

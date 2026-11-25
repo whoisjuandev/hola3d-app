@@ -188,7 +188,7 @@ describe('calendarData', () => {
   const order = (overrides: Partial<Order>): Order => ({
     id: '0142', item: 'Llaveros', client: 'Café Nube', clientId: 3, quoteId: null, projectId: null, project: null, channel: 'Instagram',
     stage: 'imprimiendo', dueDate: '2026-11-23', dueTime: null, price: 36000, deposit: null, paid: false, material: '', note: '',
-    createdAt: stamp, updatedAt: stamp, realCost: null, realProfit: null, ...overrides,
+    createdAt: stamp, updatedAt: stamp, deliveredAt: null, realCost: null, realProfit: null, ...overrides,
   });
   const project = (overrides: Partial<Project>): Project => ({
     id: 1, name: 'Kit robótica', clientId: 5, client: 'Escuela N.º 12', status: 'activo', dueDate: '2026-11-24', note: '', createdAt: stamp,

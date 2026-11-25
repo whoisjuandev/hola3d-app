@@ -50,6 +50,17 @@ describe('API dispatch', () => {
     expect(await get('/api/orders/0142/project')).toEqual({ status: 405, body: { error: 'Método no permitido.' } });
   });
 
+  it('sends the dashboard path to the dashboard module', async () => {
+    const empty = { count: 0, items: [] };
+    const { status, body } = await get('/api/dashboard');
+    expect(status).toBe(200);
+    expect(body).toEqual({
+      today: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) as unknown as string,
+      dueToday: empty, overdue: empty, lowSpools: empty, serviceDue: empty, quotesWaiting: empty,
+      month: { month: expect.stringMatching(/^\d{4}-\d{2}$/) as unknown as string, revenue: 0, deliveredCount: 0, realProfit: 0, withoutRealCost: 0 },
+    });
+  });
+
   it('sends calendar paths to the calendar module, and planned job paths to the print jobs module', async () => {
     const { status, body } = await get('/api/calendar?from=2026-11-23&to=2026-11-29');
     expect(status).toBe(200);
