@@ -154,7 +154,8 @@ async function log(request: Request, orderId: string, deps: PrintJobDeps): Promi
 
   const [printers, spools, settings] = await Promise.all([deps.printers.list(), deps.spools.list(), currentCostSettings(deps.settings)]);
   const problems = printJobProblems(result.value, printers, spools);
-  if (problems) return invalid(problems);
+  // A first try of this save may have taken the grams between the key check and this read: answer its job, not the shortage.
+  if (problems) return (await savedBefore(orderId, key.value, deps)) ?? invalid(problems);
 
   const job = await deps.jobs.log(orderId, result.value, costNow(result.value, printers, spools, settings), key.value);
   if (!job) {
@@ -259,7 +260,7 @@ async function finish(request: Request, orderId: string, jobId: number, deps: Pr
   if (!result.ok) return invalid(result.errors);
   const [printers, spools, settings] = await Promise.all([deps.printers.list(), deps.spools.list(), currentCostSettings(deps.settings)]);
   const problems = printJobProblems(result.value, printers, spools);
-  if (problems) return invalid(problems);
+  if (problems) return (await savedBefore(orderId, key.value, deps)) ?? invalid(problems);
 
   const job = await deps.jobs.finish(orderId, jobId, plannedPrinterId, result.value, costNow(result.value, printers, spools, settings), key.value);
   if (!job) {

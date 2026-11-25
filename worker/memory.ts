@@ -38,6 +38,8 @@ export interface MemoryTables {
   printers: Map<number, Printer>;
   spools: Map<number, Spool>;
   printJobs: Map<number, StoredPrintJob>;
+  /** Highest print job id ever given, kept with the tables so every adapter over them shares it (as AUTOINCREMENT). */
+  printJobSeq: { last: number };
   serviceTasks: Map<number, StoredServiceTask>;
   serviceLogs: Map<number, StoredServiceLog>;
   projects: Map<number, StoredProject>;
@@ -63,6 +65,7 @@ export function memoryTables(clients: Client[] = [], orders: StoredOrder[] = [],
     printers: new Map((workshop.printers ?? []).map((p) => [p.id, { ...p }])),
     spools: new Map((workshop.spools ?? []).map((s) => [s.id, { ...s }])),
     printJobs: new Map((workshop.printJobs ?? []).map((j) => [j.id, structuredClone(j)])),
+    printJobSeq: { last: Math.max(0, ...(workshop.printJobs ?? []).map((j) => j.id)) },
     serviceTasks: new Map((workshop.serviceTasks ?? []).map((t) => [t.id, { ...t }])),
     serviceLogs: new Map((workshop.serviceLogs ?? []).map((l) => [l.id, { ...l }])),
     projects: new Map((workshop.projects ?? []).map((p) => [p.id, { ...p }])),

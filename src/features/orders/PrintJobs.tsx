@@ -178,7 +178,12 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
           job={planning === 'new' ? null : planning}
           order={order}
           onSaved={() => void load()}
-          onDeleted={(saved) => { onOrderChange(saved); void load(); }}
+          onDeleted={(saved) => {
+            const deleted = planning === 'new' ? null : planning;
+            if (deleted) setJobs((list) => list && list.filter((j) => j.id !== deleted.id));
+            onOrderChange(saved);
+            void load();
+          }}
           onClose={() => setPlanning(null)}
         />
       )}

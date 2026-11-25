@@ -559,3 +559,26 @@ describe('POST /api/orders/:id/jobs/:jobId/finish', () => {
     expect(await call('GET', '/api/orders/0143/jobs/2/finish')).toEqual({ status: 405, body: { error: 'Método no permitido.' } });
   });
 });
+
+describe('review follow-ups: submission key after a refusal, job id high-water mark', () => {
+  for (const path of ['/api/orders/0143/jobs', '/api/orders/0143/jobs/2/finish']) {
+    for (const foreign of [false, true]) {
+      it(`rechecks the key after a stock refusal: ${path}, foreign=${foreign}`, async () => {
+        let land: (() => Promise<void>) | undefined;
+        const { call } = setup({ spools: r => ({ ...r, list: async () => {
+          const next = land; land = undefined; await next?.(); return r.list();
+        } }) });
+        const body = { printerId: 1, actualMinutes: 12, result: 'ok', filaments: [{spoolId: 2, grams: 30}], submissionKey: 'stock-race' };
+        let saved: unknown;
+        land = async () => { const first = await call('POST', foreign ? '/api/orders/0142/jobs' : path, body); expect([200,201]).toContain(first.status); saved = first.body; };
+        const retry = await call('POST', path, body);
+        expect(retry).toEqual(foreign ? { status: 409, body: { error: 'Esa clave de envío ya se usó para una impresión de otro pedido.' } } : { status: 200, body: saved });
+      });
+    }
+  }
+  it('preserves the job id high-water mark in shared storage', async () => {
+    const t = memoryTables([cafe], [pot], [], { printers: [a1], printJobs: [{ ...planned, id: 1 }] });
+    expect(await memoryPrintJobRepository(t).removePlanned('0143', 1)).toBe(true);
+    expect((await memoryPrintJobRepository(t).plan('0143', plan))?.id).toBe(2);
+  });
+});

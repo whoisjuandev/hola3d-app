@@ -414,10 +414,9 @@ export function memoryRealCost(tables: MemoryTables, orderId: string): RealCost 
 export function memoryPrintJobRepository(tables: MemoryTables): PrintJobRepository {
   const { printJobs, printers, spools } = tables;
   // As D1's AUTOINCREMENT: ids only grow, so a deleted job's id is never given to a new one.
-  let lastId = Math.max(0, ...printJobs.keys());
   const nextId = () => {
-    lastId = Math.max(lastId, ...printJobs.keys()) + 1;
-    return lastId;
+    tables.printJobSeq.last = Math.max(tables.printJobSeq.last, ...printJobs.keys()) + 1;
+    return tables.printJobSeq.last;
   };
   const keyTaken = (submissionKey: string | null) => submissionKey !== null && [...printJobs.values()].some((j) => j.submissionKey === submissionKey);
   const view = ({ submissionKey: _key, ...job }: StoredPrintJob): PrintJob => ({
