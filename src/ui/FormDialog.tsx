@@ -7,7 +7,7 @@ import './form-dialog.css';
 export interface FieldSpec {
   key: string;
   label: string;
-  type?: 'text' | 'select' | 'color' | 'textarea';
+  type?: 'text' | 'select' | 'color' | 'textarea' | 'date';
   options?: readonly { value: string; label: string }[];
   inputMode?: 'numeric' | 'decimal' | 'tel' | 'email';
   placeholder?: string;
@@ -66,6 +66,7 @@ export function FormDialog({ title, fields, initial, submitLabel, onSubmit, onCl
       return <select {...common}>{f.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>;
     }
     if (f.type === 'color') return <input {...common} type="color" />;
+    if (f.type === 'date') return <input {...common} type="date" />;
     return (
       <>
         <input {...common} inputMode={f.inputMode} placeholder={f.placeholder} list={f.suggestions ? `${id}-list` : undefined} autoComplete="off" />

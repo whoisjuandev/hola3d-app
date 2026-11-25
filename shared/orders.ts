@@ -19,6 +19,7 @@ export interface Order {
   item: string;
   client: string; // the client's name, read through the client record
   clientId: number | null; // null only for an old row the migration could not link
+  quoteId: number | null; // the quote this order was accepted from, if any
   channel: Channel;
   stage: Stage;
   dueDate: string | null; // YYYY-MM-DD

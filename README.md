@@ -12,7 +12,8 @@ The internal workshop app for Hola3D, a 3D printing shop. It tracks every order 
 | Clientes (clients) | List with search, create and edit. Client page with contact links, orders, total spent and balance owed |
 | Impresoras (printers) | List, create and edit. Shows accumulated print hours and machine wear per print hour |
 | Filamento (spools) | List, create and edit. Filter by material, total stock in grams, low-stock warning |
-| Calculadora (calculator) | Prices one or more pieces with the real cost breakdown, total and price per unit, live. Edits the workshop costs. Does not save yet (quotes come next) |
+| Calculadora (calculator) | Prices one or more pieces with the real cost breakdown, total and price per unit, live. Edits the workshop costs. Saves the calculation as a quote for a client |
+| Presupuestos (quotes) | List with status filter and totals. Quote page with the frozen lines and breakdown; mark sent, accept into orders, reject, print view for PDF, WhatsApp message. Client pages list their quotes; orders link back to their quote |
 | Inicio, Proyectos, Calendario, Servicio técnico | Placeholder screens |
 | Deploy to `app.hola3d.com.ar` | Not done yet, see [Deploy](#deploy) |
 
@@ -25,7 +26,7 @@ You need Node.js 22 or newer. Nothing here touches a Cloudflare account: the dat
 ```bash
 npm install
 npm run db:migrate   # create the local D1 tables
-npm run db:seed      # load sample clients, orders, printers, spools and cost settings
+npm run db:seed      # load sample clients, quotes, orders, printers, spools and cost settings
 npm run dev
 ```
 
@@ -45,11 +46,11 @@ One Cloudflare Worker serves both the React app and the API, and stores data in 
 
 | Folder | What lives there |
 |---|---|
-| `src/` | React 19 app (Vite, React Router). One folder per screen in `features/` (`orders/` is Pedidos, `clients/` Clientes, `printers/` Impresoras, `spools/` Filamento, `calculator/` Calculadora), `shell/` the navigation, `ui/` pieces the screens share (API calls, form dialog, icons) |
-| `worker/` | The Worker: API under `/api/*`, everything else is the single-page app. One folder per module (`orders/`, `clients/`, `printers/`, `spools/`, `settings/`) with its routes and a storage port with a D1 and an in-memory adapter (orders and clients share in-memory tables, `memory.ts`); `index.ts` tries each module in turn |
-| `shared/` | Rules used by both sides: order stages, validation and search; client validation, name matching, total spent, balance owed and contact links; printer validation, hours and wear cost; spool validation, low stock, material filter and stock totals; cost settings validation and defaults; the cost formula and spool shortages for the calculator |
+| `src/` | React 19 app (Vite, React Router). One folder per screen in `features/` (`orders/` is Pedidos, `clients/` Clientes, `printers/` Impresoras, `spools/` Filamento, `calculator/` Calculadora, `quotes/` Presupuestos and the quote print view), `shell/` the navigation, `ui/` pieces the screens share (API calls, form dialog, icons) |
+| `worker/` | The Worker: API under `/api/*`, everything else is the single-page app. One folder per module (`orders/`, `clients/`, `printers/`, `spools/`, `settings/`, `quotes/`) with its routes and a storage port with a D1 and an in-memory adapter (orders, clients and quotes share in-memory tables, `memory.ts`); `index.ts` tries each module in turn |
+| `shared/` | Rules used by both sides: order stages, validation and search; client validation, name matching, total spent, balance owed and contact links; printer validation, hours and wear cost; spool validation, low stock, material filter and stock totals; cost settings validation and defaults; the cost formula and spool shortages for the calculator; quote validation, status rules, the orders a quote becomes and its WhatsApp message |
 | `migrations/` | D1 schema, one file per change |
-| `seed/` | Sample clients, orders, printers, spools and cost settings, for local use only |
+| `seed/` | Sample clients, quotes, orders, printers, spools and cost settings, for local use only |
 
 An order moves through five stages, in order:
 
@@ -59,7 +60,7 @@ An order moves through five stages, in order:
 
 | Method | Path | What it does |
 |---|---|---|
-| GET | `/api/orders` | List all orders. Each one has `client` (the client's name) and `clientId` |
+| GET | `/api/orders` | List all orders. Each one has `client` (the client's name), `clientId` and `quoteId` (the quote it was accepted from, or null) |
 | POST | `/api/orders` | Create an order. It starts in `nuevo` and takes the next number, padded to four digits |
 | PUT | `/api/orders/:id/stage` | Move an order to another stage |
 | GET | `/api/clients` | List clients, by name, each with `orderCount`, `totalSpent` and `balanceOwed` |
@@ -74,6 +75,11 @@ An order moves through five stages, in order:
 | PUT | `/api/spools/:id` | Edit a spool. Send only the fields to change; the rest keep their value |
 | GET | `/api/settings/costs` | The workshop cost settings (the defaults, with `updatedAt` null, until saved) |
 | PUT | `/api/settings/costs` | Edit the cost settings. Send only the fields to change; the rest keep their value |
+| GET | `/api/quotes` | List quotes, newest number first, each with `client` (the client's name). `?clientId=3` lists one client's |
+| POST | `/api/quotes` | Save a calculator input as a quote. The server prices it with the stored printers, spools and settings and freezes the result |
+| GET | `/api/quotes/:id` | One quote, its `client` record and the `orders` made from it |
+| PUT | `/api/quotes/:id` | Edit `title`, `validUntil`, `note` or `status`. Send only the fields to change; the lines and prices never change |
+| POST | `/api/quotes/:id/accept` | Create one order per line and mark the quote `aceptado`, in one atomic write. Only once |
 
 ```bash
 # Create an order
@@ -134,13 +140,27 @@ The calculator prices each piece (a line: quantity, printer, print time per unit
 
 Each line is rounded on its own; the calculation's total is the sum of the line totals and its breakdown the sum of the lines'. The price per unit is the total ÷ quantity. When the pieces need more grams of a spool than it has left, the screen warns next to that filament and still shows the price. The formula is `calculateCost` in `shared/calculator.ts`.
 
+A quote saves a calculation for a client. It needs a client (`clientId`, or a `client` name, matched or created as for an order), `title`, `validUntil` (`YYYY-MM-DD`; the screen starts it 15 days from today) and `input`, the calculator's input (one to 30 pieces, each with a name of up to 100 characters and a quantity of at least 1); `note` (for the client) is optional. The server prices the input with what is stored at that moment and keeps the input and the whole result (lines, breakdown, the settings used) as JSON: later changes to settings, spools or printers never change a saved quote, and any total sent by the browser is ignored. A printer or spool that no longer exists answers 422 on `input`, before any new client is created. Quotes are numbered `P-0001`, `P-0002`… and start as `borrador`.
+
+The status moves freely between `borrador`, `enviado` and `rechazado`. Only accepting makes a quote `aceptado` (a `PUT` to `aceptado` answers 422), and an accepted quote keeps that status (409). Accepting takes an optional `channel` (default `WhatsApp`) and creates, for the quote's client, one order per line in `nuevo`: the item is the piece name with its quantity (`Llavero con logo × 12`), the price is the line's frozen price, and the order's `quoteId` points to the quote. The orders and the status change are one D1 batch, so either all of it is written or none. A second accept, or accepting a `rechazado` quote, answers 409 and creates nothing.
+
+The quote page has a print view at `/presupuestos/:id/imprimir`, outside the app shell: brand, number, date, client, items with quantity, unit price and line price, total, validity and note, never costs or margin. The browser prints it to one A4 page or saves it as PDF. The WhatsApp button opens `https://wa.me/<client phone digits>?text=…` (or `https://wa.me/?text=…` without a phone) with the items, the total and the validity date; the message is `quoteWhatsappMessage` in `shared/quotes.ts`.
+
+```bash
+# Accept quote 2; its orders came in by Instagram
+curl -X POST http://localhost:5173/api/quotes/2/accept \
+  -H 'content-type: application/json' \
+  -d '{"channel":"Instagram"}'
+```
+
 Errors come back as JSON with an `error` message in Spanish, since the app shows them as they are.
 
 | Status | When |
 |---|---|
 | 400 | The body is not JSON (for an edit, not a JSON object) |
-| 404 | The order, client, printer, spool or route does not exist |
+| 404 | The order, client, printer, spool, quote or route does not exist |
 | 405 | The method is not allowed on that path |
+| 409 | The quote was already accepted, or is rejected, so it cannot be accepted or change status |
 | 422 | The data is missing or invalid (the answer adds `fields`, one message per field), or the stage does not exist |
 
 ## Deploy

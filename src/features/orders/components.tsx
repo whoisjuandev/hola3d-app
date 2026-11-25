@@ -1,12 +1,11 @@
 // Presentational pieces of the Pedidos screen. State lives in OrdersPage.
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import type { ClientSummary } from '../../../shared/clients';
-import { findClientByName } from '../../../shared/clients';
 import type { Channel, NewOrder, Order, Stage } from '../../../shared/orders';
 import { CHANNELS, STAGES, STAGE_LABEL, nextStage, previousStage, stageIndex } from '../../../shared/orders';
 import { Icon } from '../../ui/Icon';
-import { fetchClients } from '../clients/api';
+import { ClientPicker } from '../clients/ClientPicker';
+import { clientReference, usePickerClients } from '../clients/picker';
 import { ApiError } from './api';
 import { depositLabel, dueLabel, isOverdue, money } from './format';
 
@@ -129,6 +128,7 @@ export function OrderDetail({ order, today, asSheet, onMove, onClose }: {
           <div><dt>Canal</dt><dd>{order.channel}</dd></div>
           <div><dt>Entrega</dt><dd>{dueLabel(order, today)}</dd></div>
           <div><dt>Material</dt><dd>{order.material || '—'}</dd></div>
+          {order.quoteId !== null && <div><dt>Presupuesto</dt><dd><Link to={`/presupuestos/${order.quoteId}`}>Ver presupuesto</Link></dd></div>}
           <div><dt>Precio</dt><dd className="detail__big">{money(order.price)}</dd></div>
           <div><dt>Seña</dt><dd className="detail__big">{depositLabel(order)}</dd></div>
         </dl>
@@ -177,7 +177,7 @@ export function NewOrderDialog({ onCreate, onClose }: { onCreate: (input: Partia
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [banner, setBanner] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [clients, setClients] = useState<ClientSummary[]>([]);
+  const clients = usePickerClients();
   const uid = useId();
 
   useEffect(() => {
@@ -185,15 +185,6 @@ export function NewOrderDialog({ onCreate, onClose }: { onCreate: (input: Partia
     dialog?.showModal();
     return () => dialog?.close();
   }, []);
-
-  // Without the list the form still works: the API matches the typed name to an existing client.
-  useEffect(() => {
-    let alive = true;
-    fetchClients().then((list) => { if (alive) setClients(list); }, () => undefined);
-    return () => { alive = false; };
-  }, []);
-
-  const picked = findClientByName(clients, form.client);
 
   const set = (key: keyof FormState) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
@@ -206,7 +197,7 @@ export function NewOrderDialog({ onCreate, onClose }: { onCreate: (input: Partia
       await onCreate({
         ...rest,
         // A name from the list links that client; any other name creates a new one.
-        ...(picked ? { clientId: picked.id } : { client }),
+        ...clientReference(clients, client),
         channel: form.channel as Channel,
         dueDate: form.dueDate || null,
         dueTime: form.dueTime || null,
@@ -234,12 +225,6 @@ export function NewOrderDialog({ onCreate, onClose }: { onCreate: (input: Partia
     </div>
   );
 
-  const clientHint = picked
-    ? `Cliente de la lista: ${picked.name} · ${picked.orderCount} ${picked.orderCount === 1 ? 'pedido' : 'pedidos'}`
-    : form.client.trim()
-      ? 'Cliente nuevo: se crea al guardar el pedido.'
-      : 'Elegí uno de la lista o escribí un nombre nuevo.';
-
   return (
     <dialog ref={ref} className="new-order" aria-labelledby={`${uid}-title`} onCancel={onClose}>
       <form onSubmit={submit} noValidate>
@@ -250,10 +235,8 @@ export function NewOrderDialog({ onCreate, onClose }: { onCreate: (input: Partia
         {banner && <p className="field__error" role="alert">{banner}</p>}
         <div className="new-order__grid">
           {field('item', 'Qué hay que hacer', { placeholder: 'Llaveros con logo × 12', autoFocus: true })}
-          {field('client', 'Cliente', { placeholder: 'Nombre o comercio', list: `${uid}-clients`, autoComplete: 'off' }, clientHint)}
-          <datalist id={`${uid}-clients`}>
-            {clients.map((c) => <option key={c.id} value={c.name} />)}
-          </datalist>
+          <ClientPicker id={`${uid}-client`} value={form.client} clients={clients} error={errors.client} saving="el pedido"
+            onChange={(client) => setForm((f) => ({ ...f, client }))} />
           <div className="field">
             <label className="field__label" htmlFor={`${uid}-channel`}>Llegó por</label>
             <select id={`${uid}-channel`} className="field__control" value={form.channel} onChange={set('channel')}>

@@ -1,0 +1,71 @@
+.quotes, .quote-page { display: flex; flex-direction: column; gap: 20px; }
+.quotes__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.quotes__list { display: flex; flex-direction: column; gap: 12px; }
+.quotes__sum {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 12px 16px;
+  border-radius: 14px; border: 2px dashed var(--rule); font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.quotes__sum b { font-size: 20px; font-weight: 900; }
+
+/* ---- A quote in a list ---- */
+.quote-rows { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.quote-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 16px;
+  border-radius: 8px; background: var(--card); box-shadow: var(--shadow-card); border: 2px solid transparent;
+  color: var(--ink); text-decoration: none; transition: border-color 0.16s var(--out);
+}
+@media (hover: hover) { .quote-row:hover { border-color: var(--blue); } }
+.quote-row__main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.quote-row__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; font-weight: 800; color: var(--soft); }
+.quote-row__title { font-size: 16px; line-height: 20px; font-weight: 900; overflow-wrap: anywhere; }
+.quote-row__total { font-size: 18px; font-weight: 900; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.quote-validity { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--soft); }
+.quote-validity--late { color: var(--red); }
+
+/* ---- Quote page ---- */
+.quote-page__number { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; font-size: 15px; font-weight: 900; color: var(--soft); }
+.quote-page__sub { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; }
+.quote-page__sub .quote-validity { font-size: 16px; }
+.quote-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.quote-page__note { display: flex; flex-direction: column; gap: 6px; padding: 16px 20px; }
+.quote-page__note p { font-size: 15px; line-height: 22px; white-space: pre-line; }
+.quote-page__body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: 22px; align-items: start; }
+.quote-page__lines { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+/* ---- A frozen line ---- */
+.quote-line { display: flex; flex-direction: column; gap: 12px; padding: 18px 20px; }
+.quote-line__head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.quote-line__title { font-size: 20px; line-height: 24px; font-weight: 900; overflow-wrap: anywhere; }
+.quote-line__price { display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.quote-line__price b { font-size: 20px; font-weight: 900; }
+.quote-line__facts { display: flex; flex-wrap: wrap; gap: 6px; }
+.quote-line__facts span { padding: 4px 10px; border-radius: 999px; background: var(--mist); border: 1px solid var(--rule); font-size: 13px; font-weight: 700; }
+.quote-line__uses { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.quote-line__uses li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; font-size: 14px; font-weight: 700; }
+.quote-line__uses b { font-variant-numeric: tabular-nums; }
+.quote-line__swatch { width: 22px; height: 22px; margin: 0; border-width: 2px; }
+.quote-line__details summary { cursor: pointer; font-size: 14px; font-weight: 800; color: var(--blue); }
+.quote-line__details[open] summary { margin-bottom: 8px; }
+
+/* ---- Dialogs ---- */
+.save-quote__total {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 12px 16px;
+  border-radius: 14px; background: var(--mist); border: 1px solid var(--rule); font-weight: 800;
+}
+.save-quote__total b { font-size: 24px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.save-quote__total .muted { flex-basis: 100%; }
+.accept-orders { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 12px 16px; list-style: none; border-radius: 14px; background: var(--mist); }
+.accept-orders li { display: flex; justify-content: space-between; gap: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 1100px) {
+  .quote-page__body { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  .quotes, .quote-page { gap: 16px; }
+  .quote-row { align-items: flex-start; }
+  .quote-actions .btn { flex: 1 1 calc(50% - 5px); }
+  .quote-line { padding: 16px; }
+  .quote-line__uses li { grid-template-columns: 22px minmax(0, 1fr) auto; }
+  .quote-line__uses li .muted { grid-column: 2 / -1; grid-row: 2; }
+}

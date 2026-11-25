@@ -1,8 +1,8 @@
 // Presentational pieces of the Calculadora screen. State lives in CalculatorPage.
 import { useId } from 'react';
 import type { CalcLineResult, CalcResult, SpoolShortage } from '../../../shared/calculator';
-import { BREAKDOWN_TERMS, type BreakdownKey } from '../../../shared/calculator';
-import type { CostSettings } from '../../../shared/cost-settings';
+import { BREAKDOWN_TERMS, type BreakdownKey, type CostBreakdown } from '../../../shared/calculator';
+import type { CostSettings, CostSettingsInput } from '../../../shared/cost-settings';
 import type { Printer } from '../../../shared/printers';
 import { PRINTER_STATUS_LABEL } from '../../../shared/printers';
 import type { Spool } from '../../../shared/spools';
@@ -156,26 +156,34 @@ export function LineEditor({ index, line, result, printers, spools, shortages, c
   );
 }
 
-const NOTE: Partial<Record<BreakdownKey, (s: CostSettings) => string>> = {
+const NOTE: Partial<Record<BreakdownKey, (s: CostSettingsInput) => string>> = {
   failureAllowance: (s) => percent(s.failurePercent),
   profit: (s) => percent(s.marginPercent),
   commission: (s) => percent(s.commissionPercent),
   rounding: (s) => `a ${money(s.roundingStep)}`,
 };
 
-export function Summary({ result, settings }: { result: CalcResult; settings: CostSettings }) {
+/** Every term of the formula, in order, with the percentage or step it used. */
+export function BreakdownList({ breakdown, settings }: { breakdown: CostBreakdown; settings: CostSettingsInput }) {
+  return (
+    <dl className="calc-breakdown">
+      {BREAKDOWN_TERMS.map((t) => (
+        <div key={t.key} className={t.total ? 'calc-breakdown__row calc-breakdown__row--total' : 'calc-breakdown__row'}>
+          <dt>{t.label}{NOTE[t.key] && <span className="calc-breakdown__note"> {NOTE[t.key]!(settings)}</span>}</dt>
+          <dd>{money(breakdown[t.key])}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** The price card. `settings` are the ones the result was priced with: today's, or a quote's frozen ones. */
+export function Summary({ result, settings }: { result: CalcResult; settings: CostSettingsInput }) {
   return (
     <section className="card calc-summary" id="precio" aria-labelledby="precio-titulo">
       <div className="tape" aria-hidden="true" />
       <h2 id="precio-titulo" className="calc-summary__title">Precio</h2>
-      <dl className="calc-breakdown">
-        {BREAKDOWN_TERMS.map((t) => (
-          <div key={t.key} className={t.total ? 'calc-breakdown__row calc-breakdown__row--total' : 'calc-breakdown__row'}>
-            <dt>{t.label}{NOTE[t.key] && <span className="calc-breakdown__note"> {NOTE[t.key]!(settings)}</span>}</dt>
-            <dd>{money(result.breakdown[t.key])}</dd>
-          </div>
-        ))}
-      </dl>
+      <BreakdownList breakdown={result.breakdown} settings={settings} />
       <div className="calc-summary__total">
         <span>Total</span>
         <b>{money(result.total)}</b>

@@ -11,6 +11,7 @@ const SECTIONS: Section[] = [
   { to: '/pedidos', label: 'Pedidos', short: 'Pedidos', icon: 'box', inTabs: true },
   { to: '/agenda', label: 'Calendario', short: 'Agenda', icon: 'calendar', inTabs: true },
   { to: '/clientes', label: 'Clientes', short: 'Clientes', icon: 'user', inTabs: true },
+  { to: '/presupuestos', label: 'Presupuestos', short: 'Presupuestos', icon: 'quote', inTabs: false },
   { to: '/proyectos', label: 'Proyectos', short: 'Proyectos', icon: 'folder', inTabs: false },
   { to: '/taller', label: 'Servicio técnico', short: 'Taller', icon: 'wrench', inTabs: false },
   { to: '/impresoras', label: 'Impresoras', short: 'Impresoras', icon: 'printer', inTabs: false },

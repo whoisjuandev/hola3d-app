@@ -29,6 +29,11 @@ describe('API dispatch', () => {
     expect(await get('/api/settings/costs')).toEqual({ status: 200, body: { settings: { ...DEFAULT_COST_SETTINGS, updatedAt: null } } });
   });
 
+  it('sends quote paths to the quotes module', async () => {
+    expect(await get('/api/quotes')).toEqual({ status: 200, body: { quotes: [] } });
+    expect(await get('/api/quotes/1')).toEqual({ status: 404, body: { error: 'No existe el presupuesto 1.' } });
+  });
+
   it('answers 404 when no module owns the path', async () => {
     expect(await get('/api/nada')).toEqual({ status: 404, body: { error: 'Esa ruta no existe.' } });
   });

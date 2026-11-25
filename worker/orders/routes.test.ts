@@ -12,7 +12,7 @@ const cafe: Client = {
 };
 
 const base: Order = {
-  id: '0142', item: 'Llaveros con logo × 12', client: 'Café Nube', clientId: 1, channel: 'Instagram', stage: 'imprimiendo',
+  id: '0142', item: 'Llaveros con logo × 12', client: 'Café Nube', clientId: 1, quoteId: null, channel: 'Instagram', stage: 'imprimiendo',
   dueDate: '2026-11-23', dueTime: null, price: 36000, deposit: 18000, paid: false, material: 'PLA', note: '',
   createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z',
 };

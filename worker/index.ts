@@ -5,6 +5,8 @@ import { handleOrders } from './orders/routes';
 import { d1OrderRepository } from './orders/repository';
 import { handlePrinters } from './printers/routes';
 import { d1PrinterRepository } from './printers/repository';
+import { d1QuoteRepository } from './quotes/repository';
+import { handleQuotes } from './quotes/routes';
 import { handleCostSettings } from './settings/routes';
 import { d1CostSettingsRepository } from './settings/repository';
 import { handleSpools } from './spools/routes';
@@ -19,6 +21,14 @@ const HANDLERS: Handler[] = [
   (request, url, env) => handlePrinters(request, url, d1PrinterRepository(env.DB)),
   (request, url, env) => handleSpools(request, url, d1SpoolRepository(env.DB)),
   (request, url, env) => handleCostSettings(request, url, d1CostSettingsRepository(env.DB)),
+  (request, url, env) => handleQuotes(request, url, {
+    quotes: d1QuoteRepository(env.DB),
+    orders: d1OrderRepository(env.DB),
+    clients: d1ClientRepository(env.DB),
+    printers: d1PrinterRepository(env.DB),
+    spools: d1SpoolRepository(env.DB),
+    settings: d1CostSettingsRepository(env.DB),
+  }),
 ];
 
 export default {

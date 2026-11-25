@@ -8,11 +8,13 @@ import { useCollection } from '../../ui/useCollection';
 import { ErrorBanner } from '../orders/components';
 import { money } from '../orders/format';
 import { fetchPrinters } from '../printers/api';
+import { SaveQuoteDialog } from '../quotes/components';
 import { fetchSpools } from '../spools/api';
 import { fetchCostSettings, updateCostSettings } from './api';
 import { LineEditor, SettingsDialog, Summary } from './components';
 import { newLine, newUse, toCalcInput, type LineDraft } from './draft';
 import '../orders/orders.css';
+import '../quotes/quotes.css';
 import './calculator.css';
 
 /** Loads printers, spools and the cost settings, then shows the calculator. */
@@ -86,6 +88,7 @@ function Calculator({ printers, spools, settings }: { printers: Printer[]; spool
   const defaultPrinter = (printers.find((p) => p.status === 'activa') ?? printers[0])?.id ?? null;
   const defaultSpool = (spools.find((s) => s.remainingGrams > 0) ?? spools[0])?.id ?? null;
   const [lines, setLines] = useState<LineDraft[]>(() => [newLine(1, { printerId: defaultPrinter, spoolId: defaultSpool, packaging: settings.packagingCost })]);
+  const [saving, setSaving] = useState(false);
 
   const input = useMemo(() => toCalcInput(lines), [lines]);
   const result = useMemo(() => calculateCost(input, printers, spools, settings), [input, printers, spools, settings]);
@@ -124,9 +127,12 @@ function Calculator({ printers, spools, settings }: { printers: Printer[]; spool
 
         <aside className="calc__aside">
           <Summary result={result} settings={settings} />
-          <p className="muted calc__note">El cálculo no se guarda todavía: los presupuestos llegan en la próxima etapa.</p>
+          <button type="button" className="btn btn--block" onClick={() => setSaving(true)}><Icon name="quote" />Guardar como presupuesto</button>
+          <p className="muted calc__note">Queda guardado para un cliente con el precio de hoy, listo para imprimir o mandar por WhatsApp.</p>
         </aside>
       </div>
+
+      {saving && <SaveQuoteDialog input={input} total={result.total} onClose={() => setSaving(false)} />}
 
       <a href="#precio" className="calc__bar" aria-label={`Total ${money(result.total)}, ver el detalle`}>
         <span>Total</span>

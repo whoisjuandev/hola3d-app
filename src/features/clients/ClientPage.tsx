@@ -2,13 +2,17 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import type { ClientSummary } from '../../../shared/clients';
 import type { Order } from '../../../shared/orders';
+import type { Quote } from '../../../shared/quotes';
 import { Icon } from '../../ui/Icon';
 import { ErrorBanner } from '../orders/components';
 import { isoDate } from '../orders/format';
+import { fetchClientQuotes } from '../quotes/api';
+import { QuoteRow } from '../quotes/components';
 import { fetchClient, updateClient } from './api';
 import { ClientDialog, ClientOrderRow, ClientTotals, ContactLinks } from './components';
 import '../orders/orders.css';
 import './clients.css';
+import '../quotes/quotes.css';
 
 type State =
   | { status: 'loading' }
@@ -21,12 +25,19 @@ export function ClientPage() {
   const [attempt, setAttempt] = useState(0);
   const [editing, setEditing] = useState(false);
   const [today] = useState(() => isoDate(new Date()));
+  // Loaded on their own: the client page still works when they fail.
+  const [quotes, setQuotes] = useState<Quote[] | null>(null);
+  const [quotesError, setQuotesError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     fetchClient(id).then(
       ({ client, orders }) => { if (alive) setState({ status: 'ready', client, orders }); },
       (e: Error) => { if (alive) setState({ status: 'error', error: e.message }); },
+    );
+    fetchClientQuotes(id).then(
+      (list) => { if (alive) { setQuotes(list); setQuotesError(null); } },
+      (e: Error) => { if (alive) setQuotesError(e.message); },
     );
     return () => { alive = false; };
   }, [id, attempt]);
@@ -70,6 +81,17 @@ export function ClientPage() {
             {state.orders.length === 0
               ? <p className="lane__empty">Todavía no tiene pedidos. Cargalo desde <Link to="/pedidos">Pedidos</Link> y elegí este cliente.</p>
               : <ul className="client-orders">{state.orders.map((o) => <ClientOrderRow key={o.id} order={o} today={today} />)}</ul>}
+          </section>
+
+          <section aria-labelledby="presupuestos-cliente" className="client-page__orders">
+            <h2 id="presupuestos-cliente" className="client-page__section">Presupuestos</h2>
+            {quotesError && <ErrorBanner text={`No se pudieron cargar los presupuestos: ${quotesError}`} onRetry={retry} />}
+            {quotes && quotes.length === 0 && (
+              <p className="lane__empty">Todavía no tiene presupuestos. Armalo en la <Link to="/calculadora">Calculadora</Link> y guardalo para este cliente.</p>
+            )}
+            {quotes && quotes.length > 0 && (
+              <ul className="quote-rows">{quotes.map((q) => <QuoteRow key={q.id} quote={q} today={today} showClient={false} />)}</ul>
+            )}
           </section>
 
           {editing && (

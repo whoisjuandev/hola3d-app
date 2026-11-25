@@ -9,6 +9,9 @@ import { ClientPage } from './features/clients/ClientPage';
 import { ClientsPage } from './features/clients/ClientsPage';
 import { OrdersPage } from './features/orders/OrdersPage';
 import { PrintersPage } from './features/printers/PrintersPage';
+import { QuotePage } from './features/quotes/QuotePage';
+import { QuotePrintPage } from './features/quotes/QuotePrintPage';
+import { QuotesPage } from './features/quotes/QuotesPage';
 import { SpoolsPage } from './features/spools/SpoolsPage';
 import { ComingSoon } from './screens/ComingSoon';
 
@@ -21,6 +24,8 @@ const router = createBrowserRouter([
       { path: 'pedidos', element: <OrdersPage /> },
       { path: 'clientes', element: <ClientsPage /> },
       { path: 'clientes/:id', element: <ClientPage /> },
+      { path: 'presupuestos', element: <QuotesPage /> },
+      { path: 'presupuestos/:id', element: <QuotePage /> },
       { path: 'proyectos', element: <ComingSoon title="Proyectos" /> },
       { path: 'agenda', element: <ComingSoon title="Agenda" /> },
       { path: 'taller', element: <ComingSoon title="Servicio técnico" /> },
@@ -30,6 +35,8 @@ const router = createBrowserRouter([
       { path: '*', element: <ComingSoon title="Esta página no existe" /> },
     ],
   },
+  // The client's copy of a quote, without the app shell, for printing.
+  { path: '/presupuestos/:id/imprimir', element: <QuotePrintPage /> },
 ]);
 
 createRoot(document.getElementById('root')!).render(

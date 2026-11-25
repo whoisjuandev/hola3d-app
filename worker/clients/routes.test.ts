@@ -11,7 +11,7 @@ const cafe: Client = { id: 1, name: 'Café Nube', phone: '11 5555-0142', instagr
 const lucia: Client = { id: 2, name: 'Lucía M.', phone: '', instagram: '', email: '', note: '', createdAt: stamp, updatedAt: stamp };
 
 const printing: Order = {
-  id: '0142', item: 'Llaveros con logo × 12', client: 'Café Nube', clientId: 1, channel: 'Instagram', stage: 'imprimiendo',
+  id: '0142', item: 'Llaveros con logo × 12', client: 'Café Nube', clientId: 1, quoteId: null, channel: 'Instagram', stage: 'imprimiendo',
   dueDate: '2026-11-23', dueTime: null, price: 36000, deposit: 18000, paid: false, material: 'PLA', note: '', createdAt: stamp, updatedAt: stamp,
 };
 const delivered: Order = { ...printing, id: '0130', item: 'Cartel con logo', stage: 'entregado', price: 20000, deposit: null, paid: true };

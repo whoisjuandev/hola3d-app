@@ -1,0 +1,55 @@
+/* The client's copy of a quote: an A4 sheet on screen, one clean A4 page on paper or PDF. */
+.print-page { min-height: 100dvh; padding: 24px 16px 48px; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.print-tools { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; width: min(210mm, 100%); }
+.print-tools .btn:last-child { margin-left: auto; }
+
+.quote-doc {
+  width: min(210mm, 100%); min-height: 297mm; padding: 18mm 16mm; display: flex; flex-direction: column; gap: 22px;
+  background: var(--white); color: var(--ink); box-shadow: var(--shadow-card); border-radius: 4px;
+}
+.quote-doc__head { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; padding-bottom: 18px; border-bottom: 4px solid var(--ink); }
+.quote-doc__brand { display: flex; align-items: center; gap: 12px; }
+.quote-doc__brand-name { display: block; font-size: 34px; line-height: 1; font-weight: 900; letter-spacing: -0.01em; }
+.quote-doc__brand-tag { display: block; margin-top: 2px; font-size: 21px; line-height: 1; color: var(--blue); }
+.quote-doc__id { text-align: right; font-weight: 700; }
+.quote-doc__id h1 { font-size: 30px; line-height: 34px; font-weight: 900; }
+.quote-doc__number { font-size: 20px; font-weight: 900; color: var(--blue); }
+.quote-doc__label { font-size: 12px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--soft); }
+.quote-doc__client-name { font-size: 22px; line-height: 28px; font-weight: 900; }
+.quote-doc__title { margin-top: 4px; font-size: 16px; font-weight: 700; color: var(--soft); }
+
+.quote-doc__items { width: 100%; border-collapse: collapse; font-size: 15px; font-variant-numeric: tabular-nums; }
+.quote-doc__items th, .quote-doc__items td { padding: 10px 8px; text-align: left; vertical-align: top; }
+.quote-doc__items thead th { font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--soft); border-bottom: 2px solid var(--ink); }
+.quote-doc__items tbody td { font-weight: 700; border-bottom: 1px solid var(--rule); }
+.quote-doc__items tbody tr { break-inside: avoid; }
+.quote-doc__items .num { text-align: right; white-space: nowrap; }
+.quote-doc__items tfoot th, .quote-doc__items tfoot td { padding-top: 14px; font-size: 22px; font-weight: 900; border-top: 3px solid var(--ink); }
+.quote-doc__items tfoot th { text-align: right; }
+
+.quote-doc__validity { font-size: 16px; font-weight: 700; }
+.quote-doc__note { padding: 12px 14px; border-radius: 10px; border: 2px dashed var(--rule); font-size: 15px; line-height: 22px; white-space: pre-line; }
+.quote-doc__foot { margin-top: auto; padding-top: 18px; border-top: 2px solid var(--rule); font-size: 22px; color: var(--blue); }
+
+@media (max-width: 760px) {
+  .print-page { padding: 12px 8px 32px; }
+  .quote-doc { min-height: 0; padding: 22px 16px; gap: 18px; }
+  .quote-doc__head { flex-direction: column; }
+  .quote-doc__id { text-align: left; }
+  .quote-doc__items { font-size: 13px; }
+  .quote-doc__items th, .quote-doc__items td { padding: 8px 3px; }
+  .quote-doc__items thead th { font-size: 10px; letter-spacing: 0.02em; }
+  .quote-doc__items thead th.num { white-space: normal; }
+  .quote-doc__items tfoot th, .quote-doc__items tfoot td { font-size: 18px; }
+}
+
+@page { size: A4; margin: 14mm; }
+
+@media print {
+  html, body { background: var(--white); }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .print-tools { display: none; }
+  .print-page { min-height: 0; padding: 0; display: block; }
+  /* The page margins come from @page. No minimum height, so the sheet never spills onto a blank second page. */
+  .quote-doc { width: auto; min-height: 0; padding: 0; box-shadow: none; border-radius: 0; }
+}
