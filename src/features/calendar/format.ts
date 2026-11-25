@@ -1,10 +1,15 @@
 // Dates, titles and layout of the Calendario screen. The rules for what falls in a range are in shared/calendar.ts.
-import { addDays, localMinutes, weekStart, type CalendarData, type CalendarPlannedJob, type DateRange } from '../../../shared/calendar';
+import {
+  addDays, dayAgenda, localMinutes, weekStart, type AgendaEntry, type CalendarData, type CalendarOrder, type CalendarPlannedJob, type CalendarProject,
+  type CalendarServiceTask, type DateRange,
+} from '../../../shared/calendar';
+import { EVENT_TYPE_LABEL, type CalendarEvent, type EventType } from '../../../shared/calendar-events';
 import { isCalendarDate } from '../../../shared/quotes';
 
 export type CalendarView = 'mes' | 'semana';
 
 const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const DAY_NAMES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 const SHORT_MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 /** Monday first, as the weeks are laid out. */
 export const WEEKDAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
@@ -73,6 +78,12 @@ export function weekTitle(anchor: string): string {
 export function dayTitle(date: string): string {
   const [, m, d] = parts(date);
   return `${WEEKDAYS[weekdayIndex(date)]} ${d} ${SHORT_MONTHS[m - 1]}`;
+}
+
+/** "Miércoles 25 de noviembre". */
+export function longDayTitle(date: string): string {
+  const [, m, d] = parts(date);
+  return `${DAY_NAMES[weekdayIndex(date)]} ${d} de ${MONTHS[m - 1]}`;
 }
 
 /** "09:00 – 17:00", or "22:00 – vie 06:00" when it ends on another day. */
@@ -155,9 +166,9 @@ export function hourMarks(hours: LaneHours): { text: string; left: number }[] {
   return marks;
 }
 
-export type ItemKind = 'order' | 'project' | 'service' | 'job';
+export type ItemKind = 'order' | 'project' | 'service' | 'job' | 'event';
 
-export const KIND_LABEL: Record<ItemKind, string> = { order: 'Entrega', project: 'Proyecto', service: 'Servicio', job: 'Impresión' };
+export const KIND_LABEL: Record<ItemKind, string> = { order: 'Entrega', project: 'Proyecto', service: 'Servicio', job: 'Impresión', event: 'Evento' };
 
 export interface DayItem {
   key: string;
@@ -165,7 +176,46 @@ export interface DayItem {
   label: string;
   detail: string;
   overdue: boolean;
-  to: string; // where clicking it leads
+  to: string | null; // where clicking it leads; null for a hand-made event, which is changed where it is shown
+  /** A hand-made event's type, done flag and record. */
+  eventType?: EventType;
+  done?: boolean;
+  event?: CalendarEvent;
+}
+
+const orderItem = (o: CalendarOrder): DayItem => ({
+  key: `order-${o.id}`, kind: 'order', label: `#${o.id} ${o.item}`, detail: o.dueTime ? `${o.client} · ${o.dueTime}` : o.client,
+  overdue: o.overdue, to: `/pedidos?pedido=${o.id}`,
+});
+const projectItem = (p: CalendarProject): DayItem => ({
+  key: `project-${p.id}`, kind: 'project', label: p.name, detail: p.client, overdue: p.overdue, to: `/proyectos/${p.id}`,
+});
+const serviceItem = (t: CalendarServiceTask): DayItem => ({
+  key: `service-${t.id}`, kind: 'service', label: t.name, detail: t.printer, overdue: t.overdue, to: `/taller?impresora=${t.printerId}`,
+});
+const jobItem = (j: CalendarPlannedJob): DayItem => ({
+  key: `job-${j.id}`, kind: 'job', label: `#${j.orderId} ${j.item}`, detail: `${j.printer} · ${timeRange(j)}`, overdue: false, to: `/pedidos?pedido=${j.orderId}`,
+});
+const eventItem = (e: CalendarEvent): DayItem => ({
+  key: `event-${e.id}`, kind: 'event', label: e.title, detail: e.time ? `${EVENT_TYPE_LABEL[e.type]} · ${e.time}` : EVENT_TYPE_LABEL[e.type],
+  overdue: false, to: null, eventType: e.type, done: e.done, event: e,
+});
+
+export function itemClass(item: DayItem): string {
+  return [
+    'cal-item', `cal-item--${item.kind}`, item.eventType && `cal-ev--${item.eventType}`, item.done && 'cal-item--done', item.overdue && 'cal-item--late',
+  ].filter(Boolean).join(' ');
+}
+
+/** The dot of an item on a phone's month cell: its kind's colour, its event type's, or red when late. */
+export function dotClass(item: DayItem): string {
+  if (item.overdue) return 'cal-dot cal-dot--late';
+  return item.eventType ? `cal-dot cal-dot--event cal-ev--${item.eventType}` : `cal-dot cal-dot--${item.kind}`;
+}
+
+/** "Entrega", "Proyecto", … and an event's own type ("Reunión"). */
+export function kindLabel(item: DayItem): string {
+  return item.eventType ? EVENT_TYPE_LABEL[item.eventType] : KIND_LABEL[item.kind];
 }
 
 /** A planned job touches the day when any minute of it falls inside it. */
@@ -173,26 +223,42 @@ function jobOnDay(job: CalendarPlannedJob, date: string): boolean {
   return job.start < `${addDays(date, 1)}T00:00` && job.end > `${date}T00:00`;
 }
 
-/** What falls on `date`, by type: due orders, projects and service tasks, then planned jobs (unless `withJobs` is false). */
+/**
+ * What falls on `date`, by type: due orders, projects and service tasks, hand-made events, then planned jobs (unless
+ * `withJobs` is false).
+ */
 export function dayItems(data: CalendarData, date: string, withJobs = true): DayItem[] {
-  const items: DayItem[] = [
-    ...data.orders.filter((o) => o.dueDate === date).map((o): DayItem => ({
-      key: `order-${o.id}`, kind: 'order', label: `#${o.id} ${o.item}`, detail: o.dueTime ? `${o.client} · ${o.dueTime}` : o.client,
-      overdue: o.overdue, to: `/pedidos?pedido=${o.id}`,
-    })),
-    ...data.projects.filter((p) => p.dueDate === date).map((p): DayItem => ({
-      key: `project-${p.id}`, kind: 'project', label: p.name, detail: p.client, overdue: p.overdue, to: `/proyectos/${p.id}`,
-    })),
-    ...data.serviceTasks.filter((t) => t.dueDate === date).map((t): DayItem => ({
-      key: `service-${t.id}`, kind: 'service', label: t.name, detail: t.printer, overdue: t.overdue, to: `/taller?impresora=${t.printerId}`,
-    })),
+  return [
+    ...data.orders.filter((o) => o.dueDate === date).map(orderItem),
+    ...data.projects.filter((p) => p.dueDate === date).map(projectItem),
+    ...data.serviceTasks.filter((t) => t.dueDate === date).map(serviceItem),
+    ...data.events.filter((e) => e.date === date).map(eventItem),
+    ...(withJobs ? data.plannedJobs.filter((job) => jobOnDay(job, date)).map(jobItem) : []),
   ];
-  if (withJobs) {
-    for (const j of data.plannedJobs.filter((job) => jobOnDay(job, date))) {
-      items.push({
-        key: `job-${j.id}`, kind: 'job', label: `#${j.orderId} ${j.item}`, detail: `${j.printer} · ${timeRange(j)}`, overdue: false, to: `/pedidos?pedido=${j.orderId}`,
-      });
-    }
+}
+
+function agendaItem(entry: AgendaEntry): DayItem {
+  switch (entry.kind) {
+    case 'event': return eventItem(entry.event);
+    case 'order': return orderItem(entry.order);
+    case 'project': return projectItem(entry.project);
+    case 'service': return serviceItem(entry.task);
+    case 'job': return jobItem(entry.job);
   }
-  return items;
+}
+
+/** The day panel: everything on `date` in time order, the untimed things first, each with its time on that day. */
+export function panelItems(data: CalendarData, date: string): (DayItem & { time: string | null })[] {
+  return dayAgenda(data, date).map((entry) => ({ ...agendaItem(entry), time: entry.time }));
+}
+
+/** The event form's values: a new event on `date` starts as a task without time. */
+export function eventDraft(event: CalendarEvent | null, date: string): Record<string, string> {
+  if (!event) return { type: 'tarea', title: '', date, time: '', note: '' };
+  return { type: event.type, title: event.title, date: event.date, time: event.time ?? '', note: event.note };
+}
+
+/** The body of an event request from the form values given (all of them, or only the changed ones): an empty time is none. */
+export function eventBody(values: Record<string, string>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, key === 'time' && value === '' ? null : value]));
 }

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addDays, addMinutes, calendarData, isLocalDateTime, localMinutes, planProblems, serviceDueDate, spanEnd, spanInRange, spansOverlap,
+  addDays, addMinutes, calendarData, dayAgenda, isLocalDateTime, localMinutes, planProblems, serviceDueDate, spanEnd, spanInRange, spansOverlap,
   validateCalendarRange, validatePlannedJob, weekStart, type PlannedSlot,
 } from './calendar';
+import type { CalendarEvent } from './calendar-events';
 import type { Order } from './orders';
 import type { Printer } from './printers';
 import type { Project } from './projects';
@@ -268,5 +269,70 @@ describe('calendarData', () => {
       },
     ]);
     expect(data).toMatchObject({ from: '2026-11-23', to: '2026-11-29', today: '2026-11-25' });
+  });
+});
+
+describe('calendar events', () => {
+  const range = { from: '2026-11-23', to: '2026-11-29' };
+  const event = (id: number, date: string, time: string | null, overrides: Partial<CalendarEvent> = {}): CalendarEvent => ({
+    id, type: 'reunion', title: `Evento ${id}`, date, time, note: '', done: false, createdAt: stamp, updatedAt: stamp, ...overrides,
+  });
+
+  it('lists the events inside the range by date, untimed first, then by time', () => {
+    const events = [
+      event(1, '2026-11-26', '15:00'), event(2, '2026-11-22', null), event(3, '2026-11-26', null, { done: true }),
+      event(4, '2026-11-23', '09:00'), event(5, '2026-11-30', null), event(6, '2026-11-29', '08:00'),
+    ];
+    const data = calendarData(range, '2026-11-25', { orders: [], projects: [], tasks: [], plannedJobs: [], events });
+    expect(data.events.map((e) => e.id)).toEqual([4, 3, 1, 6]);
+    expect(data.events[1]).toEqual(events[2]);
+  });
+
+  it('answers no events when it is given none', () => {
+    expect(calendarData(range, '2026-11-25', { orders: [], projects: [], tasks: [], plannedJobs: [] }).events).toEqual([]);
+  });
+});
+
+describe('dayAgenda', () => {
+  const day = '2026-11-26';
+  const data = {
+    events: [
+      { id: 1, type: 'reunion' as const, title: 'Reunión', date: day, time: '10:00', note: '', done: false, createdAt: stamp, updatedAt: stamp },
+      { id: 2, type: 'recordatorio' as const, title: 'Pagar luz', date: day, time: null, note: '', done: true, createdAt: stamp, updatedAt: stamp },
+      { id: 3, type: 'tarea' as const, title: 'Otro día', date: '2026-11-27', time: null, note: '', done: false, createdAt: stamp, updatedAt: stamp },
+    ],
+    orders: [
+      { id: '0144', item: 'Piezas', client: 'Escuela', clientId: 5, stage: 'imprimiendo' as const, dueDate: day, dueTime: '09:00', projectId: null, project: null, overdue: false },
+      { id: '0145', item: 'Soporte', client: 'Martín', clientId: 6, stage: 'nuevo' as const, dueDate: day, dueTime: null, projectId: null, project: null, overdue: false },
+    ],
+    projects: [{ id: 1, name: 'Kit robótica', client: 'Escuela', clientId: 5, status: 'activo' as const, dueDate: day, overdue: false }],
+    serviceTasks: [{ id: 4, name: 'Limpiar la cama', printerId: 1, printer: 'La A1', dueDate: day, overdue: false }],
+    plannedJobs: [
+      { id: 7, orderId: '0144', item: 'Piezas', client: 'Escuela', printerId: 1, printer: 'La A1', start: '2026-11-26T10:00', end: '2026-11-26T18:00', estimatedMinutes: 480, note: '' },
+      { id: 6, orderId: '0142', item: 'Llaveros', client: 'Café', printerId: 2, printer: 'La P1S', start: '2026-11-25T22:00', end: '2026-11-26T02:00', estimatedMinutes: 240, note: '' },
+      { id: 8, orderId: '0146', item: 'Mate', client: 'Sofía', printerId: 1, printer: 'La A1', start: '2026-11-26T18:00', end: '2026-11-26T19:30', estimatedMinutes: 90, note: '' },
+      { id: 9, orderId: '0146', item: 'Mate', client: 'Sofía', printerId: 1, printer: 'La A1', start: '2026-11-25T18:00', end: '2026-11-26T00:00', estimatedMinutes: 360, note: '' },
+    ],
+  };
+
+  it('lists everything on the day in time order, untimed first; ties keep events, orders, projects, service, prints', () => {
+    expect(dayAgenda(data, day).map((e) => [e.kind, e.time])).toEqual([
+      ['event', null], ['order', null], ['project', null], ['service', null],
+      ['job', '00:00'], ['order', '09:00'], ['event', '10:00'], ['job', '10:00'], ['job', '18:00'],
+    ]);
+  });
+
+  it('carries each item and gives a print that started the day before the start of the day', () => {
+    const agenda = dayAgenda(data, day);
+    expect(agenda[0]).toEqual({ kind: 'event', time: null, event: data.events[1] });
+    expect(agenda[1]).toEqual({ kind: 'order', time: null, order: data.orders[1] });
+    expect(agenda[2]).toEqual({ kind: 'project', time: null, project: data.projects[0] });
+    expect(agenda[3]).toEqual({ kind: 'service', time: null, task: data.serviceTasks[0] });
+    expect(agenda[4]).toEqual({ kind: 'job', time: '00:00', job: data.plannedJobs[1] });
+  });
+
+  it('is empty on a day with nothing, and reads data without events', () => {
+    expect(dayAgenda(data, '2026-11-28')).toEqual([]);
+    expect(dayAgenda({ ...data, events: undefined }, '2026-11-27')).toEqual([]);
   });
 });

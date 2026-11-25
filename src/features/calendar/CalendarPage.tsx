@@ -1,7 +1,9 @@
-// Calendario: a month and a week of due orders, projects, service tasks by date, and the prints planned per printer.
+// Calendario: a month and a week of due orders, projects, service tasks by date, hand-made events, and the prints planned
+// per printer. The month view has a panel with everything of the chosen day.
 import { Fragment, useEffect, useState, type CSSProperties } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { useSearchParams } from 'react-router';
 import type { CalendarData, CalendarPlannedJob } from '../../../shared/calendar';
+import { EVENT_TYPE_LABEL, EVENT_TYPES, type CalendarEvent } from '../../../shared/calendar-events';
 import type { Printer } from '../../../shared/printers';
 import { workshopToday } from '../../../shared/service';
 import { Icon } from '../../ui/Icon';
@@ -10,10 +12,13 @@ import { ErrorBanner } from '../orders/components';
 import { fetchPrinters } from '../printers/api';
 import { durationLabel } from '../quotes/format';
 import { fetchCalendar } from './api';
+import { DayPanel } from './DayPanel';
+import { EventDialog } from './EventDialog';
 import {
-  KIND_LABEL, WEEKDAYS, dayBars, dayItems, dayTitle, hourMarks, laneHours, monthGrid, monthTitle, readView, shiftAnchor, timeRange, viewRange, weekDays, weekTitle,
-  type CalendarView, type DayItem, type ItemKind,
+  KIND_LABEL, WEEKDAYS, dayBars, dayItems, dayTitle, dotClass, hourMarks, itemClass, kindLabel, laneHours, monthGrid, monthTitle, readView, shiftAnchor,
+  timeRange, viewRange, weekDays, weekTitle, type CalendarView, type ItemKind,
 } from './format';
+import { ItemLink } from './items';
 import { PlanJobDialog, type PlannedJobRef } from './PlanJobDialog';
 import '../orders/orders.css';
 import './calendar.css';
@@ -22,6 +27,9 @@ type State = { status: 'loading' } | { status: 'error'; error: string } | { stat
 
 /** What the plan dialog opens with: a planned job to change, or a new plan on a day and maybe a printer. */
 type Dialog = { job: CalendarPlannedJob } | { date: string; printerId?: number };
+
+/** What the event form opens with: an event to edit, or a new one on a day. */
+type EventForm = { event: CalendarEvent | null; date: string };
 
 const MONTH_LABELS = 3; // labels a month cell shows before "+N más"
 const TRACK_HEIGHT = 50; // px per track of a printer's row
@@ -37,6 +45,7 @@ export function CalendarPage() {
   const [attempt, setAttempt] = useState(0);
   // `?planificar=1` (from Inicio) opens the plan dialog on today.
   const [dialog, setDialog] = useState<Dialog | null>(() => (params.get('planificar') === '1' ? { date: today } : null));
+  const [eventForm, setEventForm] = useState<EventForm | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -49,6 +58,8 @@ export function CalendarPage() {
   }, [key, attempt]);
 
   const go = (nextView: CalendarView, nextAnchor: string) => setParams({ vista: nextView, dia: nextAnchor });
+  // Choosing a day of the month selects it (kept as `dia`); one of another month also moves the grid there.
+  const select = (day: string) => setParams({ vista: 'mes', dia: day }, { replace: day.slice(0, 7) === anchor.slice(0, 7) });
   const reload = () => setAttempt((n) => n + 1);
   // The data of another range stays on screen, faded, until the new one arrives.
   const ready = state.status === 'ready' ? state : null;
@@ -88,12 +99,22 @@ export function CalendarPage() {
 
       {ready && (
         <div className={stale ? 'calendar__body calendar__body--stale' : 'calendar__body'} aria-busy={stale}>
-          {view === 'mes' && <MonthView anchor={anchor} today={today} data={ready.data} compact={isPhone} onOpenWeek={(day) => go('semana', day)} />}
+          {view === 'mes' && (
+            <div className="cal-month-layout">
+              <MonthView anchor={anchor} today={today} data={ready.data} compact={isPhone} onSelect={select} />
+              <DayPanel day={anchor} today={today} data={ready.data} onAdd={() => setEventForm({ event: null, date: anchor })}
+                onEdit={(event) => setEventForm({ event, date: event.date })} onChanged={reload} />
+            </div>
+          )}
           {view === 'semana' && !isPhone && (
             <WeekGrid anchor={anchor} today={today} data={ready.data} printers={ready.printers}
-              onPlan={(date, printerId) => setDialog({ date, printerId })} onOpenJob={(job) => setDialog({ job })} />
+              onPlan={(date, printerId) => setDialog({ date, printerId })} onOpenJob={(job) => setDialog({ job })}
+              onOpenEvent={(event) => setEventForm({ event, date: event.date })} />
           )}
-          {view === 'semana' && isPhone && <DayList anchor={anchor} today={today} data={ready.data} onOpenJob={(job) => setDialog({ job })} />}
+          {view === 'semana' && isPhone && (
+            <DayList anchor={anchor} today={today} data={ready.data} onOpenJob={(job) => setDialog({ job })}
+              onOpenEvent={(event) => setEventForm({ event, date: event.date })} />
+          )}
         </div>
       )}
 
@@ -111,6 +132,8 @@ export function CalendarPage() {
           }}
         />
       )}
+
+      {eventForm && <EventDialog event={eventForm.event} date={eventForm.date} onSaved={reload} onClose={() => setEventForm(null)} />}
     </div>
   );
 }
@@ -125,26 +148,14 @@ function Legend() {
     <ul className="calendar__legend" aria-label="Referencias">
       {kinds.map((k) => <li key={k}><span className={`cal-dot cal-dot--${k}`} aria-hidden="true" />{KIND_LABEL[k]}</li>)}
       <li><span className="cal-dot cal-dot--late" aria-hidden="true" />Atrasado</li>
+      <li className="calendar__legend-group">Eventos:</li>
+      {EVENT_TYPES.map((t) => <li key={t}><span className={`cal-dot cal-dot--event cal-ev--${t}`} aria-hidden="true" />{EVENT_TYPE_LABEL[t]}</li>)}
     </ul>
   );
 }
 
-function itemClass(item: DayItem): string {
-  return `cal-item cal-item--${item.kind}${item.overdue ? ' cal-item--late' : ''}`;
-}
-
-/** One due order, project or service task, linked to its section. */
-function ItemLink({ item }: { item: DayItem }) {
-  return (
-    <Link to={item.to} className={itemClass(item)} title={`${item.label} · ${item.detail}`}>
-      <span className="cal-item__label">{item.label}</span>
-      <span className="cal-item__detail">{item.detail}{item.overdue ? ' · atrasado' : ''}</span>
-    </Link>
-  );
-}
-
-function MonthView({ anchor, today, data, compact, onOpenWeek }: {
-  anchor: string; today: string; data: CalendarData; compact: boolean; onOpenWeek: (day: string) => void;
+function MonthView({ anchor, today, data, compact, onSelect }: {
+  anchor: string; today: string; data: CalendarData; compact: boolean; onSelect: (day: string) => void;
 }) {
   const month = anchor.slice(0, 7);
   return (
@@ -154,14 +165,19 @@ function MonthView({ anchor, today, data, compact, onOpenWeek }: {
         const items = dayItems(data, day);
         const shown = items.slice(0, compact ? 4 : MONTH_LABELS);
         const more = items.length - shown.length;
-        const classes = ['cal-month__day', day.slice(0, 7) !== month && 'cal-month__day--other', day === today && 'cal-month__day--today'].filter(Boolean).join(' ');
-        const summary = items.length === 0 ? 'nada' : items.map((i) => `${KIND_LABEL[i.kind]} ${i.label}${i.overdue ? ', atrasado' : ''}`).join('; ');
+        const classes = [
+          'cal-month__day', day.slice(0, 7) !== month && 'cal-month__day--other', day === today && 'cal-month__day--today', day === anchor && 'cal-month__day--selected',
+        ].filter(Boolean).join(' ');
+        const summary = items.length === 0
+          ? 'nada'
+          : items.map((i) => `${kindLabel(i)} ${i.label}${i.overdue ? ', atrasado' : ''}${i.done ? ', hecho' : ''}`).join('; ');
         return (
-          <button key={day} type="button" className={classes} onClick={() => onOpenWeek(day)} aria-label={`${dayTitle(day)}: ${summary}. Ver la semana.`}>
+          <button key={day} type="button" className={classes} onClick={() => onSelect(day)} aria-pressed={day === anchor}
+            aria-label={`${dayTitle(day)}: ${summary}.`}>
             <span className="cal-month__num">{Number(day.slice(8))}</span>
             {compact ? (
               <span className="cal-month__dots" aria-hidden="true">
-                {shown.map((i) => <span key={i.key} className={`cal-dot cal-dot--${i.overdue ? 'late' : i.kind}`} />)}
+                {shown.map((i) => <span key={i.key} className={dotClass(i)} />)}
                 {more > 0 && <span className="cal-month__more">+{more}</span>}
               </span>
             ) : (
@@ -185,9 +201,9 @@ function DayHead({ day, today }: { day: string; today: string }) {
   );
 }
 
-function WeekGrid({ anchor, today, data, printers, onPlan, onOpenJob }: {
+function WeekGrid({ anchor, today, data, printers, onPlan, onOpenJob, onOpenEvent }: {
   anchor: string; today: string; data: CalendarData; printers: Printer[];
-  onPlan: (date: string, printerId: number) => void; onOpenJob: (job: CalendarPlannedJob) => void;
+  onPlan: (date: string, printerId: number) => void; onOpenJob: (job: CalendarPlannedJob) => void; onOpenEvent: (event: CalendarEvent) => void;
 }) {
   const days = weekDays(anchor);
   // One row per active printer, plus any other printer that has a planned job this week.
@@ -201,10 +217,10 @@ function WeekGrid({ anchor, today, data, printers, onPlan, onOpenJob }: {
         <span className="cal-week__corner" />
         {days.map((d) => <DayHead key={d} day={d} today={today} />)}
 
-        <span className="cal-week__label">Entregas y servicio</span>
+        <span className="cal-week__label">Entregas, servicio y eventos</span>
         {days.map((d) => (
           <div key={d} className={d === today ? 'cal-week__cell cal-week__cell--today' : 'cal-week__cell'}>
-            {dayItems(data, d, false).map((item) => <ItemLink key={item.key} item={item} />)}
+            {dayItems(data, d, false).map((item) => <ItemLink key={item.key} item={item} onOpenEvent={onOpenEvent} />)}
           </div>
         ))}
 
@@ -259,9 +275,9 @@ function WeekGrid({ anchor, today, data, printers, onPlan, onOpenJob }: {
   );
 }
 
-/** The week on a phone: one block per day with what is due and what prints. */
-function DayList({ anchor, today, data, onOpenJob }: {
-  anchor: string; today: string; data: CalendarData; onOpenJob: (job: CalendarPlannedJob) => void;
+/** The week on a phone: one block per day with what is due, its events and what prints. */
+function DayList({ anchor, today, data, onOpenJob, onOpenEvent }: {
+  anchor: string; today: string; data: CalendarData; onOpenJob: (job: CalendarPlannedJob) => void; onOpenEvent: (event: CalendarEvent) => void;
 }) {
   return (
     <ol className="cal-days">
@@ -272,7 +288,7 @@ function DayList({ anchor, today, data, onOpenJob }: {
           <li key={d} className={d === today ? 'cal-day cal-day--today' : 'cal-day'}>
             <h2 className="cal-day__title"><DayHead day={d} today={today} /></h2>
             {items.length === 0 && jobs.length === 0 && <p className="cal-day__empty">Nada para este día.</p>}
-            {items.map((item) => <ItemLink key={item.key} item={item} />)}
+            {items.map((item) => <ItemLink key={item.key} item={item} onOpenEvent={onOpenEvent} />)}
             {jobs.map((j) => (
               <button key={j.id} type="button" className="cal-item cal-item--job" onClick={() => onOpenJob(j)}
                 aria-label={`Impresión planeada del pedido #${j.orderId}, ${j.item}, en ${j.printer}, ${timeRange(j)}. Cambiar el plan.`}>

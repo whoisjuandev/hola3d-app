@@ -1,3 +1,4 @@
+import type { CalendarEvent } from '../shared/calendar-events';
 import type { Client } from '../shared/clients';
 import type { Order } from '../shared/orders';
 import type { PrintJob } from '../shared/print-jobs';
@@ -43,6 +44,9 @@ export interface MemoryTables {
   serviceTasks: Map<number, StoredServiceTask>;
   serviceLogs: Map<number, StoredServiceLog>;
   projects: Map<number, StoredProject>;
+  calendarEvents: Map<number, CalendarEvent>;
+  /** Highest calendar event id ever given, so a deleted event's id is never given again (as AUTOINCREMENT). */
+  calendarEventSeq: { last: number };
 }
 
 export interface WorkshopSeed {
@@ -52,6 +56,7 @@ export interface WorkshopSeed {
   serviceTasks?: StoredServiceTask[];
   serviceLogs?: StoredServiceLog[];
   projects?: StoredProject[];
+  calendarEvents?: CalendarEvent[];
 }
 
 export function memoryTables(clients: Client[] = [], orders: StoredOrder[] = [], quotes: Quote[] = [], workshop: WorkshopSeed = {}): MemoryTables {
@@ -69,5 +74,7 @@ export function memoryTables(clients: Client[] = [], orders: StoredOrder[] = [],
     serviceTasks: new Map((workshop.serviceTasks ?? []).map((t) => [t.id, { ...t }])),
     serviceLogs: new Map((workshop.serviceLogs ?? []).map((l) => [l.id, { ...l }])),
     projects: new Map((workshop.projects ?? []).map((p) => [p.id, { ...p }])),
+    calendarEvents: new Map((workshop.calendarEvents ?? []).map((e) => [e.id, { ...e }])),
+    calendarEventSeq: { last: Math.max(0, ...(workshop.calendarEvents ?? []).map((e) => e.id)) },
   };
 }

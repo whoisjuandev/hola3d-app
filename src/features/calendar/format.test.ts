@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { CalendarData } from '../../../shared/calendar';
+import type { CalendarEvent } from '../../../shared/calendar-events';
 import {
-  dayBars, dayItems, dayTitle, hourMarks, laneHours, monthGrid, monthTitle, readView, shiftAnchor, timeRange, viewRange, weekDays, weekTitle,
+  dayBars, dayItems, dayTitle, dotClass, eventBody, eventDraft, hourMarks, itemClass, kindLabel, laneHours, longDayTitle, monthGrid, monthTitle, panelItems, readView, shiftAnchor,
+  timeRange, viewRange, weekDays, weekTitle,
 } from './format';
 import { planChanges, planDraft, planRequest } from './plan-form';
 
@@ -118,6 +120,7 @@ describe('dayItems', () => {
       id: 6, orderId: '0144', item: 'Piezas', client: 'Escuela', printerId: 1, printer: 'La A1', start: '2026-11-22T20:00', end: '2026-11-23T02:00',
       estimatedMinutes: 360, note: '',
     }],
+    events: [],
   };
 
   it('lists what falls on a day by type, with where each one leads', () => {
@@ -132,6 +135,81 @@ describe('dayItems', () => {
 
   it('leaves planned jobs out when asked, for the week view that draws them per printer', () => {
     expect(dayItems(data, '2026-11-23', false).map((i) => i.kind)).toEqual(['order', 'project', 'service']);
+  });
+});
+
+const stamp = '2026-11-01T00:00:00.000Z';
+const calEvent = (overrides: Partial<CalendarEvent>): CalendarEvent => ({
+  id: 1, type: 'reunion', title: 'Escuela', date: '2026-11-23', time: '10:30', note: 'Muestras', done: false, createdAt: stamp, updatedAt: stamp, ...overrides,
+});
+
+describe('events in the day items', () => {
+  const data: CalendarData = {
+    from: '2026-11-23', to: '2026-11-29', today: '2026-11-25',
+    orders: [{
+      id: '0142', item: 'Llaveros', client: 'Café Nube', clientId: 3, stage: 'imprimiendo', dueDate: '2026-11-23', dueTime: '09:00', projectId: null, project: null, overdue: true,
+    }],
+    projects: [{ id: 1, name: 'Kit robótica', client: 'Escuela', clientId: 5, status: 'activo', dueDate: '2026-11-23', overdue: false }],
+    serviceTasks: [{ id: 4, name: 'Limpiar la cama', printerId: 1, printer: 'La A1', dueDate: '2026-11-23', overdue: false }],
+    plannedJobs: [{
+      id: 6, orderId: '0144', item: 'Piezas', client: 'Escuela', printerId: 1, printer: 'La A1', start: '2026-11-23T08:00', end: '2026-11-23T12:00',
+      estimatedMinutes: 240, note: '',
+    }],
+    events: [calEvent({ id: 2, type: 'recordatorio', title: 'Pagar la luz', time: null, done: true }), calEvent({}), calEvent({ id: 3, date: '2026-11-24' })],
+  };
+
+  it('shows events after service and before prints, with their type, time and done flag, linking nowhere', () => {
+    const items = dayItems(data, '2026-11-23');
+    expect(items.map((i) => i.key)).toEqual(['order-0142', 'project-1', 'service-4', 'event-2', 'event-1', 'job-6']);
+    expect(items[3]).toEqual({
+      key: 'event-2', kind: 'event', label: 'Pagar la luz', detail: 'Recordatorio', overdue: false, to: null, eventType: 'recordatorio', done: true, event: data.events[0],
+    });
+    expect(items[4]).toMatchObject({ detail: 'Reunión · 10:30', eventType: 'reunion', done: false });
+    expect(dayItems(data, '2026-11-23', false).map((i) => i.kind)).toEqual(['order', 'project', 'service', 'event', 'event']);
+  });
+
+  it('lists the day panel in time order, untimed first, each with its time and where it leads', () => {
+    expect(panelItems(data, '2026-11-23').map((i) => [i.key, i.time, i.to])).toEqual([
+      ['event-2', null, null],
+      ['project-1', null, '/proyectos/1'],
+      ['service-4', null, '/taller?impresora=1'],
+      ['job-6', '08:00', '/pedidos?pedido=0144'],
+      ['order-0142', '09:00', '/pedidos?pedido=0142'],
+      ['event-1', '10:30', null],
+    ]);
+    expect(panelItems(data, '2026-11-24').map((i) => i.key)).toEqual(['event-3']);
+    expect(panelItems(data, '2026-11-25')).toEqual([]);
+  });
+
+  it('gives an event its type colour and strikes it through once done; other items keep their kind', () => {
+    const [order, , , done, open] = dayItems(data, '2026-11-23');
+    expect(itemClass(done)).toBe('cal-item cal-item--event cal-ev--recordatorio cal-item--done');
+    expect(itemClass(open)).toBe('cal-item cal-item--event cal-ev--reunion');
+    expect(itemClass(order)).toBe('cal-item cal-item--order cal-item--late');
+    expect([dotClass(open), dotClass(order)]).toEqual(['cal-dot cal-dot--event cal-ev--reunion', 'cal-dot cal-dot--late']);
+    expect([kindLabel(open), kindLabel(order)]).toEqual(['Reunión', 'Entrega']);
+  });
+
+  it('names a day in full', () => {
+    expect(longDayTitle('2026-11-25')).toBe('Miércoles 25 de noviembre');
+    expect(longDayTitle('2026-11-29')).toBe('Domingo 29 de noviembre');
+  });
+});
+
+describe('event form', () => {
+  it('starts a new event on the day, as a task without time', () => {
+    expect(eventDraft(null, '2026-11-27')).toEqual({ type: 'tarea', title: '', date: '2026-11-27', time: '', note: '' });
+  });
+
+  it('starts from an event when editing it', () => {
+    expect(eventDraft(calEvent({}), '2026-11-27')).toEqual({ type: 'reunion', title: 'Escuela', date: '2026-11-23', time: '10:30', note: 'Muestras' });
+    expect(eventDraft(calEvent({ time: null }), '2026-11-27').time).toBe('');
+  });
+
+  it('becomes the body of a request: an empty time is no time', () => {
+    expect(eventBody({ type: 'tarea', title: 'x', date: '2026-11-27', time: '', note: '' })).toEqual({ type: 'tarea', title: 'x', date: '2026-11-27', time: null, note: '' });
+    expect(eventBody({ time: '09:15' })).toEqual({ time: '09:15' });
+    expect(eventBody({ note: 'n' })).toEqual({ note: 'n' });
   });
 });
 

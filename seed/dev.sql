@@ -1,8 +1,9 @@
--- Sample clients, projects, quotes, orders, printers, spools, print jobs (logged and planned), service tasks and logs, and cost settings for local
--- development only (npm run db:seed). Never run against production. Contact details are made up.
+-- Sample clients, projects, quotes, orders, printers, spools, print jobs (logged and planned), service tasks and logs, calendar events and cost
+-- settings for local development only (npm run db:seed). Never run against production. Contact details are made up.
 -- As of 2026-11-25 the home screen has something in every block: order 0145 is due today, 0141, 0142 and 0143 are late,
 -- Lavanda and Dorado silk are low, three service tasks are due, P-0002 waits for an answer, and 0140 was delivered this
 -- month with its real cost.
+DELETE FROM calendar_events;
 DELETE FROM service_logs;
 DELETE FROM service_tasks;
 DELETE FROM print_job_filaments;
@@ -145,6 +146,16 @@ INSERT INTO service_logs (id, printer_id, task_id, service_date, done, parts, co
 (7, 1, 1, '2026-11-10', 'Limpiar boquilla', 'Aguja de limpieza 0,4 mm', 1500, '', '2026-11-10T18:00:00Z', '2026-11-10T18:00:00Z'),
 (8, 2, 5, '2026-11-18', 'Cambio de boquilla', 'Boquilla 0,4 mm de latón × 2', 6500, 'Estaba tapada. Vuelve el lunes.', '2026-11-18T12:00:00Z', '2026-11-18T12:00:00Z'),
 (9, 3, NULL, '2026-01-10', 'Desarmada para repuestos', '', 0, 'Se guardaron el hotend y los motores.', '2026-01-10T12:00:00Z', '2026-01-10T12:00:00Z');
+
+-- Hand-made calendar events of every type around 2026-11-25, one of them already done (shown struck through).
+INSERT INTO calendar_events (id, type, title, event_date, event_time, note, done, created_at, updated_at) VALUES
+(1, 'recordatorio', 'Pagar la luz del taller', '2026-11-24', NULL, 'Vence el 25.', 1, '2026-11-20T12:00:00Z', '2026-11-24T10:00:00Z'),
+(2, 'reunion', 'Escuela N.º 12: ver muestras del kit', '2026-11-25', '10:30', 'Llevar dos piezas impresas en PETG.', 0, '2026-11-20T12:00:00Z', '2026-11-20T12:00:00Z'),
+(3, 'tarea', 'Pedir PETG negro', '2026-11-25', NULL, 'Dos rollos para la segunda mitad del kit.', 0, '2026-11-21T12:00:00Z', '2026-11-21T12:00:00Z'),
+(4, 'retiro', 'Retirar PETG negro en el proveedor', '2026-11-27', '18:00', 'Pagar en efectivo al retirar.', 0, '2026-11-22T12:00:00Z', '2026-11-22T12:00:00Z'),
+(5, 'entrega', 'Llevar llaveros a Café Nube', '2026-11-28', '11:00', '', 0, '2026-11-22T12:00:00Z', '2026-11-22T12:00:00Z'),
+(6, 'recordatorio', 'Cobrar la seña del Kit robótica', '2026-12-01', NULL, '', 0, '2026-11-23T12:00:00Z', '2026-11-23T12:00:00Z'),
+(7, 'reunion', 'Martín R.: el nombre del soporte', '2026-12-03', '19:00', 'Por videollamada.', 0, '2026-11-23T12:00:00Z', '2026-11-23T12:00:00Z');
 
 -- The single cost settings row (the migration creates it with defaults; these are the sample shop's numbers).
 INSERT OR REPLACE INTO cost_settings (id, kwh_price, labour_per_hour, failure_percent, margin_percent, monthly_fixed_costs, monthly_print_hours, packaging_cost, rounding_step, commission_percent, updated_at) VALUES

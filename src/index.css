@@ -23,6 +23,17 @@
   --red: #e63b2e;
   --blue: #2b4fd1;
   --white: #ffffff;
+  /* Hand-made calendar events, one colour per type, each with a soft background. */
+  --green: #1f9d6b;
+  --green-soft: #e3f6ec;
+  --orange: #f08a24;
+  --orange-soft: #fdeedc;
+  --violet: #8a5cd6;
+  --violet-soft: #f1eafb;
+  --teal: #0e9a92;
+  --teal-soft: #dcf3f1;
+  --pink: #e0569b;
+  --pink-soft: #fce8f2;
 
   --out: cubic-bezier(0.23, 1, 0.32, 1);
   --shadow-card: 0 2px 2px rgba(0, 0, 0, 0.16), 0 24px 28px -22px rgba(0, 0, 0, 0.6);

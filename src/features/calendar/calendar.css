@@ -1,4 +1,4 @@
-/* Calendario: month grid, week grid with a lane per printer, and the day list on a phone. */
+/* Calendario: month grid with the day panel, week grid with a lane per printer, and the day list on a phone. */
 .calendar { display: flex; flex-direction: column; gap: 18px; }
 .calendar__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
 .calendar__tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
@@ -15,6 +15,15 @@
 .cal-dot--service { background: var(--white); }
 .cal-dot--job { background: var(--blue); }
 .cal-dot--late { background: var(--red); }
+.calendar__legend .calendar__legend-group { margin-left: 4px; color: var(--ink); }
+
+/* Hand-made events: one colour per type (--ev, with its soft background --ev-soft) on labels and dots. */
+.cal-ev--entrega { --ev: var(--green); --ev-soft: var(--green-soft); }
+.cal-ev--retiro { --ev: var(--orange); --ev-soft: var(--orange-soft); }
+.cal-ev--reunion { --ev: var(--violet); --ev-soft: var(--violet-soft); }
+.cal-ev--tarea { --ev: var(--teal); --ev-soft: var(--teal-soft); }
+.cal-ev--recordatorio { --ev: var(--pink); --ev-soft: var(--pink-soft); }
+.cal-dot--event { background: var(--ev); }
 
 /* ---- An item: a due order, project, service task or planned job ---- */
 .cal-item {
@@ -30,6 +39,9 @@
 .cal-item--service { border-left-color: var(--ink); border-style: dashed; border-left-style: solid; }
 .cal-item--job { border-color: var(--blue); background: var(--blue); color: var(--white); }
 .cal-item--job .cal-item__detail { color: var(--rule); }
+.cal-item--event { border-left-color: var(--ev); background: var(--ev-soft); }
+.cal-item--done { opacity: 0.7; }
+.cal-item--done .cal-item__label { text-decoration: line-through; text-decoration-thickness: 2px; }
 .cal-item--late { border-color: var(--red); border-left-color: var(--red); }
 .cal-item--late .cal-item__detail { color: var(--red); }
 @media (hover: hover) { a.cal-item:hover, button.cal-item:hover { box-shadow: 0 3px 0 var(--ink); } }
@@ -47,6 +59,8 @@
 .cal-month__day--other .cal-month__num { color: var(--faint); }
 .cal-month__day--today { border-color: var(--blue); box-shadow: inset 0 0 0 2px var(--blue); }
 .cal-month__num { font-size: 15px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.cal-month__day--selected { border-color: var(--ink); background: var(--mist); box-shadow: 0 3px 0 var(--ink); }
+.cal-month__day--selected.cal-month__day--today { border-color: var(--blue); box-shadow: inset 0 0 0 2px var(--blue), 0 3px 0 var(--ink); }
 .cal-month__day--today .cal-month__num { align-self: flex-start; padding: 0 7px; border-radius: 999px; background: var(--blue); color: var(--white); }
 .cal-month__items { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .cal-month__items .cal-item { padding: 1px 6px; border-width: 1px; border-left-width: 4px; border-radius: 6px; cursor: inherit; }
@@ -55,6 +69,40 @@
 .cal-month__dots { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
 .cal-month__dots .cal-dot { width: 8px; height: 8px; border-width: 1px; }
 .cal-month__dots .cal-month__more { font-size: 11px; }
+
+/* ---- Month with the day panel: side by side on a wide screen, the panel below the grid otherwise ---- */
+.cal-month-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+.cal-panel {
+  position: sticky; top: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 14px;
+  border-radius: 14px; border: 2px solid var(--ink); background: var(--card);
+}
+.cal-panel__head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; }
+.cal-panel__title { display: flex; align-items: center; gap: 8px; font-size: 18px; line-height: 24px; }
+.cal-panel__week { display: inline-flex; align-items: center; gap: 2px; font-size: 14px; font-weight: 800; }
+.cal-panel__add { align-self: flex-start; }
+.cal-agenda { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.cal-agenda__row { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; align-items: start; }
+.cal-agenda__time { padding-top: 6px; font-size: 12px; line-height: 15px; font-weight: 900; color: var(--soft); font-variant-numeric: tabular-nums; }
+.cal-agenda__body { display: flex; flex-direction: column; min-width: 0; }
+.cal-agenda__body .cal-item { padding: 6px 10px; }
+.cal-agenda__event { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cal-agenda__line { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.cal-agenda__line .cal-item { flex: 1; cursor: default; }
+.cal-agenda__note { font-size: 12px; line-height: 16px; font-weight: 600; color: var(--soft); white-space: pre-line; overflow-wrap: anywhere; }
+.cal-agenda__actions { display: flex; gap: 6px; padding-left: 40px; }
+.cal-agenda__actions .btn--sm { min-height: 32px; padding: 0 12px; }
+.cal-agenda__delete { color: var(--red); }
+.cal-check {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin-top: 2px; padding: 0;
+  border-radius: 999px; border: 2px solid var(--ink); background: var(--white); color: transparent; cursor: pointer;
+}
+.cal-check[aria-pressed="true"] { background: var(--ink); color: var(--white); }
+@media (hover: hover) { .cal-check:not(:disabled):hover { color: var(--faint); } .cal-check[aria-pressed="true"]:not(:disabled):hover { color: var(--white); } }
+.cal-check:disabled { opacity: 0.5; cursor: progress; }
+@media (max-width: 1100px) {
+  .cal-month-layout { grid-template-columns: minmax(0, 1fr); }
+  .cal-panel { position: static; }
+}
 
 /* ---- Week ---- */
 .cal-week { overflow-x: auto; }

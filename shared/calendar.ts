@@ -1,6 +1,7 @@
 // The calendar: dates, planned print jobs and what falls due in a range of days. Shared by the Worker API and the React app.
 // Dates are YYYY-MM-DD and planned starts YYYY-MM-DDTHH:MM, both on the workshop's clock (Buenos Aires, see
 // `workshopToday`); no time zone is ever applied to them, so the arithmetic below reads them as UTC on purpose.
+import { compareDayTime, sortEvents, type CalendarEvent } from './calendar-events';
 import { asBody, readText, type Errors } from './fields';
 import { isOrderOverdue, type Order, type Stage, type ValidationResult } from './orders';
 import type { PrintJob } from './print-jobs';
@@ -235,6 +236,7 @@ export interface CalendarData extends DateRange {
   projects: CalendarProject[];
   serviceTasks: CalendarServiceTask[];
   plannedJobs: CalendarPlannedJob[];
+  events: CalendarEvent[]; // the hand-made events of the range
 }
 
 export interface CalendarSources {
@@ -242,13 +244,14 @@ export interface CalendarSources {
   projects: Project[];
   tasks: Pick<ServiceTask, 'id' | 'name' | 'printerId' | 'printer' | 'intervalDays' | 'lastDoneDate'>[];
   plannedJobs: (PlannedSlot & Pick<PrintJob, 'printer' | 'note'>)[];
+  events?: CalendarEvent[];
 }
 
 const byText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * What the calendar shows for the range on `today`: order and project due dates, the service tasks that become due by
- * date, and the planned jobs that have any minute inside it. Each list is sorted by date.
+ * date, the planned jobs that have any minute inside it, and the hand-made events. Each list is sorted by date.
  */
 export function calendarData(range: DateRange, today: string, sources: CalendarSources): CalendarData {
   const orders: CalendarOrder[] = sources.orders
@@ -283,5 +286,39 @@ export function calendarData(range: DateRange, today: string, sources: CalendarS
     }))
     .sort((a, b) => byText(a.start, b.start) || a.printer.localeCompare(b.printer, 'es') || a.id - b.id);
 
-  return { ...range, today, orders, projects, serviceTasks, plannedJobs };
+  const events = sortEvents((sources.events ?? []).filter((e) => inRange(e.date, range)));
+
+  return { ...range, today, orders, projects, serviceTasks, plannedJobs, events };
+}
+
+/** One thing of a day's agenda, with its time on that day (null for the whole day). */
+export type AgendaEntry =
+  | { kind: 'event'; time: string | null; event: CalendarEvent }
+  | { kind: 'order'; time: string | null; order: CalendarOrder }
+  | { kind: 'project'; time: null; project: CalendarProject }
+  | { kind: 'service'; time: null; task: CalendarServiceTask }
+  | { kind: 'job'; time: string; job: CalendarPlannedJob };
+
+const AGENDA_KINDS: AgendaEntry['kind'][] = ['event', 'order', 'project', 'service', 'job'];
+
+/**
+ * Everything on `date` in time order, the untimed things first: hand-made events, due orders (at their due time),
+ * project due dates, service tasks due, and planned prints with any minute in the day (at their start, or 00:00 for one
+ * that started the day before). Things at the same time keep the order of the kinds above, then their lists' order.
+ */
+export function dayAgenda(
+  data: Pick<CalendarData, 'orders' | 'projects' | 'serviceTasks' | 'plannedJobs'> & { events?: CalendarEvent[] }, date: string,
+): AgendaEntry[] {
+  const nextDay = `${addDays(date, 1)}T00:00`;
+  const entries: AgendaEntry[] = [
+    ...(data.events ?? []).filter((e) => e.date === date).map((event): AgendaEntry => ({ kind: 'event', time: event.time, event })),
+    ...data.orders.filter((o) => o.dueDate === date).map((order): AgendaEntry => ({ kind: 'order', time: order.dueTime, order })),
+    ...data.projects.filter((p) => p.dueDate === date).map((project): AgendaEntry => ({ kind: 'project', time: null, project })),
+    ...data.serviceTasks.filter((t) => t.dueDate === date).map((task): AgendaEntry => ({ kind: 'service', time: null, task })),
+    ...data.plannedJobs
+      .filter((j) => j.start < nextDay && j.end > `${date}T00:00`)
+      .map((job): AgendaEntry => ({ kind: 'job', time: job.start.startsWith(date) ? job.start.slice(11) : '00:00', job })),
+  ];
+  // Array sort is stable, so equal times keep the order built above.
+  return entries.sort((a, b) => compareDayTime(a.time, b.time) || AGENDA_KINDS.indexOf(a.kind) - AGENDA_KINDS.indexOf(b.kind));
 }

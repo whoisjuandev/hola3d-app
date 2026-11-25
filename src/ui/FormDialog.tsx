@@ -8,7 +8,7 @@ export interface FieldSpec {
   key: string;
   label: string;
   /** A checkbox holds 'true' or 'false'. */
-  type?: 'text' | 'select' | 'color' | 'textarea' | 'date' | 'checkbox';
+  type?: 'text' | 'select' | 'color' | 'textarea' | 'date' | 'time' | 'checkbox';
   options?: readonly { value: string; label: string }[];
   inputMode?: 'numeric' | 'decimal' | 'tel' | 'email';
   placeholder?: string;
@@ -68,6 +68,7 @@ export function FormDialog({ title, fields, initial, submitLabel, onSubmit, onCl
     }
     if (f.type === 'color') return <input {...common} type="color" />;
     if (f.type === 'date') return <input {...common} type="date" />;
+    if (f.type === 'time') return <input {...common} type="time" />;
     return (
       <>
         <input {...common} inputMode={f.inputMode} placeholder={f.placeholder} list={f.suggestions ? `${id}-list` : undefined} autoComplete="off" />
@@ -77,10 +78,10 @@ export function FormDialog({ title, fields, initial, submitLabel, onSubmit, onCl
   };
 
   return (
-    <dialog ref={ref} className="form-dialog" aria-labelledby={`${uid}-title`} onCancel={onClose}>
+    <dialog ref={ref} className="form-dialog" aria-labelledby={`${uid}-heading`} onCancel={onClose}>
       <form onSubmit={submit} noValidate>
         <div className="form-dialog__head">
-          <h2 id={`${uid}-title`} className="form-dialog__title">{title}</h2>
+          <h2 id={`${uid}-heading`} className="form-dialog__title">{title}</h2>
           <button type="button" className="icon-btn icon-btn--quiet" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button>
         </div>
         {banner && <p className="field__error" role="alert">{banner}</p>}

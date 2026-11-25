@@ -66,8 +66,10 @@ describe('API dispatch', () => {
     expect(status).toBe(200);
     expect(body).toEqual({
       from: '2026-11-23', to: '2026-11-29', today: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) as unknown as string,
-      orders: [], projects: [], serviceTasks: [], plannedJobs: [],
+      orders: [], projects: [], serviceTasks: [], plannedJobs: [], events: [],
     });
+    expect(await get('/api/calendar/events')).toEqual({ status: 405, body: { error: 'Método no permitido.' } });
+    expect(await get('/api/calendar/events/1')).toEqual({ status: 405, body: { error: 'Método no permitido.' } });
     expect(await get('/api/orders/0142/jobs/plan')).toEqual({ status: 405, body: { error: 'Método no permitido.' } });
     expect(await get('/api/orders/0142/jobs/3/finish')).toEqual({ status: 405, body: { error: 'Método no permitido.' } });
   });
