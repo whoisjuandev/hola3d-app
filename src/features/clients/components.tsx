@@ -1,4 +1,5 @@
 // Presentational pieces of the Clientes screens. State lives in ClientsPage and ClientPage.
+import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { Client, ClientSummary } from '../../../shared/clients';
 import { balanceOwed, instagramUrl, whatsappUrl } from '../../../shared/clients';
@@ -55,8 +56,8 @@ export function ClientCard({ client, onEdit }: { client: ClientSummary; onEdit: 
   );
 }
 
-/** One of the client's orders, with what is left to collect. */
-export function ClientOrderRow({ order, today }: { order: Order; today: string }) {
+/** One of the client's orders, with what is left to collect. `action` goes under the money, like a project's remove button. */
+export function ClientOrderRow({ order, today, action }: { order: Order; today: string; action?: ReactNode }) {
   const late = isOverdue(order, today);
   const owed = balanceOwed([order]);
   return (
@@ -71,6 +72,7 @@ export function ClientOrderRow({ order, today }: { order: Order; today: string }
       <div className="client-order__money">
         <b>{money(order.price)}</b>
         <span className={owed > 0 ? 'client-order__owed' : 'muted'}>{order.paid ? 'Pagado' : owed > 0 ? `Debe ${money(owed)}` : 'Sin saldo'}</span>
+        {action}
       </div>
     </li>
   );

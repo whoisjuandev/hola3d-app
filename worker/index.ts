@@ -8,6 +8,8 @@ import { d1PrintJobRepository } from './print-jobs/repository';
 import { handlePrintJobs } from './print-jobs/routes';
 import { handlePrinters } from './printers/routes';
 import { d1PrinterRepository } from './printers/repository';
+import { d1ProjectRepository } from './projects/repository';
+import { handleProjects } from './projects/routes';
 import { d1QuoteRepository } from './quotes/repository';
 import { handleQuotes } from './quotes/routes';
 import { d1ServiceRepository } from './service/repository';
@@ -24,7 +26,7 @@ type Handler = (request: Request, url: URL, env: Env) => Promise<Response | null
 
 /** Each module answers its own paths and returns null for the rest, so they are tried in turn. */
 const HANDLERS: Handler[] = [
-  (request, url, env) => handleOrders(request, url, d1OrderRepository(env.DB), d1ClientRepository(env.DB)),
+  (request, url, env) => handleOrders(request, url, d1OrderRepository(env.DB), d1ClientRepository(env.DB), d1ProjectRepository(env.DB)),
   (request, url, env) => handlePrintJobs(request, url, {
     jobs: d1PrintJobRepository(env.DB),
     orders: d1OrderRepository(env.DB),
@@ -33,6 +35,11 @@ const HANDLERS: Handler[] = [
     settings: d1CostSettingsRepository(env.DB),
   }),
   (request, url, env) => handleClients(request, url, d1ClientRepository(env.DB), d1OrderRepository(env.DB)),
+  (request, url, env) => handleProjects(request, url, {
+    projects: d1ProjectRepository(env.DB),
+    orders: d1OrderRepository(env.DB),
+    clients: d1ClientRepository(env.DB),
+  }),
   (request, url, env) => handlePrinters(request, url, d1PrinterRepository(env.DB), { service: d1ServiceRepository(env.DB), today }),
   (request, url, env) => handleService(request, url, { service: d1ServiceRepository(env.DB), printers: d1PrinterRepository(env.DB), today }),
   (request, url, env) => handleSpools(request, url, d1SpoolRepository(env.DB)),

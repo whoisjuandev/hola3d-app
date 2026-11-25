@@ -8,14 +8,15 @@ The internal workshop app for Hola3D, a 3D printing shop. It tracks every order 
 
 | Section | State |
 |---|---|
-| Pedidos (orders) | Works end to end: board, search, new order (pick a client or type a new one), stage moves. The order detail logs print jobs (printer, time, grams per spool, result, and optionally labour minutes and an extra cost); each job's cost is frozen when logged, and the detail shows the real cost in six terms and the real profit next to the price |
-| Clientes (clients) | List with search, create and edit. Client page with contact links, orders, total spent and balance owed |
+| Pedidos (orders) | Works end to end: board, search, new order (pick a client or type a new one, and optionally one of that client's active projects), stage moves. Cards show their project as a small label; the order detail shows the project with a link and changes or clears it. The order detail logs print jobs (printer, time, grams per spool, result, and optionally labour minutes and an extra cost); each job's cost is frozen when logged, and the detail shows the real cost in six terms and the real profit next to the price |
+| Clientes (clients) | List with search, create and edit. Client page with contact links, orders, projects, total spent and balance owed |
+| Proyectos (projects) | List with an active/finished filter: client, due date (overdue when past and still active), progress and totals. Create and edit with the client picker. Project page with its orders and their stages, progress (delivered ÷ all orders), price, deposits and balance; add an order of that client that has no project, take one out, mark the project finished or reopen it |
 | Impresoras (printers) | List, create and edit. Shows accumulated print hours and machine wear per print hour; logged print jobs add their hours. A new printer comes with the default service plan unless unticked; each card shows a badge with its service tasks due (it links to Servicio técnico), or offers the plan when it has none |
 | Servicio técnico (machine service) | Recurring tasks per printer, due by print hours or days, whichever comes first: what is due first, then what comes next with how much is left. Log a service from a task (it restarts that task's count) or on its own, with parts and cost; the log and the service cost per printer. Filter by printer. Create, edit and deactivate tasks; adopt the default plan |
 | Filamento (spools) | List, create and edit. Filter by material, total stock in grams, low-stock warning; logged print jobs take their grams off |
 | Calculadora (calculator) | Prices one or more pieces with the real cost breakdown, total and price per unit, live. Edits the workshop costs. Saves the calculation as a quote for a client |
 | Presupuestos (quotes) | List with status filter and totals. Quote page with the frozen lines and breakdown; mark sent, accept into orders, reject, print view for PDF, WhatsApp message. Client pages list their quotes; orders link back to their quote |
-| Inicio, Proyectos, Calendario | Placeholder screens |
+| Inicio, Calendario | Placeholder screens |
 | Deploy to `app.hola3d.com.ar` | Not done yet, see [Deploy](#deploy) |
 
 The app has no login of its own. It is meant to run behind Cloudflare Access, so do not deploy it without that step.
@@ -27,7 +28,7 @@ You need Node.js 22 or newer. Nothing here touches a Cloudflare account: the dat
 ```bash
 npm install
 npm run db:migrate   # create the local D1 tables
-npm run db:seed      # load sample clients, quotes, orders, printers, spools, print jobs, service tasks and logs, and cost settings
+npm run db:seed      # load sample clients, projects, quotes, orders, printers, spools, print jobs, service tasks and logs, and cost settings
 npm run dev
 ```
 
@@ -47,11 +48,11 @@ One Cloudflare Worker serves both the React app and the API, and stores data in 
 
 | Folder | What lives there |
 |---|---|
-| `src/` | React 19 app (Vite, React Router). One folder per screen in `features/` (`orders/` is Pedidos, `clients/` Clientes, `printers/` Impresoras, `spools/` Filamento, `calculator/` Calculadora, `quotes/` Presupuestos and the quote print view, `service/` Servicio técnico), `shell/` the navigation, `ui/` pieces the screens share (API calls, form dialog, icons) |
-| `worker/` | The Worker: API under `/api/*`, everything else is the single-page app. One folder per module (`orders/`, `print-jobs/`, `clients/`, `printers/`, `spools/`, `settings/`, `quotes/`, `service/`) with its routes and a storage port with a D1 and an in-memory adapter (the in-memory adapters share tables, `memory.ts`, where they read each other's rows); `index.ts` tries each module in turn |
-| `shared/` | Rules used by both sides: order stages, validation and search; client validation, name matching, total spent, balance owed and contact links; printer validation, hours and wear cost; spool validation, low stock, material filter and stock totals; cost settings validation and defaults; the cost formula and spool shortages for the calculator; quote validation, status rules, the orders a quote becomes and its WhatsApp message; print job validation, the cost of one job and the real cost of an order from its jobs' stored costs; service task and log validation, when a task is due and how much is left, the due-first order, the default plan and the service cost per printer |
+| `src/` | React 19 app (Vite, React Router). One folder per screen in `features/` (`orders/` is Pedidos, `clients/` Clientes, `printers/` Impresoras, `spools/` Filamento, `calculator/` Calculadora, `quotes/` Presupuestos and the quote print view, `service/` Servicio técnico, `projects/` Proyectos and the project page), `shell/` the navigation, `ui/` pieces the screens share (API calls, form dialog, icons) |
+| `worker/` | The Worker: API under `/api/*`, everything else is the single-page app. One folder per module (`orders/`, `print-jobs/`, `clients/`, `projects/`, `printers/`, `spools/`, `settings/`, `quotes/`, `service/`) with its routes and a storage port with a D1 and an in-memory adapter (the in-memory adapters share tables, `memory.ts`, where they read each other's rows); `index.ts` tries each module in turn |
+| `shared/` | Rules used by both sides: order stages, validation and search; client validation, name matching, total spent, balance owed and contact links; printer validation, hours and wear cost; spool validation, low stock, material filter and stock totals; cost settings validation and defaults; the cost formula and spool shortages for the calculator; quote validation, status rules, the orders a quote becomes and its WhatsApp message; print job validation, the cost of one job and the real cost of an order from its jobs' stored costs; service task and log validation, when a task is due and how much is left, the due-first order, the default plan and the service cost per printer; project validation, progress, totals, when a project is overdue and the one-client rule for its orders |
 | `migrations/` | D1 schema, one file per change |
-| `seed/` | Sample clients, quotes, orders, printers, spools, print jobs, service tasks and logs, and cost settings, for local use only |
+| `seed/` | Sample clients, projects, quotes, orders, printers, spools, print jobs, service tasks and logs, and cost settings, for local use only |
 
 An order moves through five stages, in order:
 
@@ -61,9 +62,10 @@ An order moves through five stages, in order:
 
 | Method | Path | What it does |
 |---|---|---|
-| GET | `/api/orders` | List all orders. Each one has `client` (the client's name), `clientId`, `quoteId` (the quote it was accepted from, or null), and `realCost` and `realProfit` (from its print jobs; null while it has none) |
-| POST | `/api/orders` | Create an order. It starts in `nuevo` and takes the next number, padded to four digits |
+| GET | `/api/orders` | List all orders. Each one has `client` (the client's name), `clientId`, `quoteId` (the quote it was accepted from, or null), `projectId` and `project` (its project's id and name, or null), and `realCost` and `realProfit` (from its print jobs; null while it has none) |
+| POST | `/api/orders` | Create an order. It starts in `nuevo` and takes the next number, padded to four digits. With `projectId`, it goes in that project |
 | PUT | `/api/orders/:id/stage` | Move an order to another stage |
+| PUT | `/api/orders/:id/project` | Put the order in a project of its client with `{"projectId": 3}`, or take it out of any with `{"projectId": null}` |
 | GET | `/api/orders/:id/jobs` | The order's print jobs, oldest first, each with its stored `cost`, and `cost`: the order's real cost term by term (null without jobs) |
 | POST | `/api/orders/:id/jobs` | Log a finished print job: store it with its cost, add its minutes to the printer and take its grams off each spool, in one atomic write. Answers the job and the order |
 | DELETE | `/api/orders/:id/jobs/:jobId` | Delete a logged job and give its minutes and grams back, in one atomic write. Answers the order |
@@ -71,6 +73,10 @@ An order moves through five stages, in order:
 | POST | `/api/clients` | Create a client |
 | GET | `/api/clients/:id` | One client with its totals, and its `orders` |
 | PUT | `/api/clients/:id` | Edit a client. Send only the fields to change; the rest keep their value |
+| GET | `/api/projects` | List projects, active first then by due date, each with `client` (the client's name), `orderCount`, `deliveredCount`, `progress`, `totalPrice`, `totalDeposits` and `balanceOwed`. `?clientId=5` lists one client's |
+| POST | `/api/projects` | Create a project |
+| GET | `/api/projects/:id` | One project with its totals, and its `orders` |
+| PUT | `/api/projects/:id` | Edit a project, or mark it `terminado`. Send only the fields to change; the rest keep their value |
 | GET | `/api/printers` | List printers, by name |
 | POST | `/api/printers` | Create a printer. With `"servicePlan": true`, also its default service plan, in one atomic write |
 | POST | `/api/printers/:id/service-plan` | Add the default service plan to a printer without active tasks. 409 when it has some |
@@ -105,6 +111,20 @@ curl -X PUT http://localhost:5173/api/orders/0142/stage \
 ```
 
 A new order needs `item`, a client, `channel` and `price` (whole pesos). The client is either `clientId` (an existing client; an unknown id answers 422 on `clientId` and stores nothing) or `client`, a name: when it matches an existing client, ignoring case, accents and surrounding spaces, the order goes to that client; otherwise a client with that name is created. `dueDate`, `dueTime`, `deposit`, `material` and `note` are optional. The channel is one of `Instagram`, `WhatsApp`, `Tienda web`, `Email` or `En persona`.
+
+A new order can take `projectId`, a project of the same client (the one picked by `clientId`, or the one its `client` name matches). A project of another client, or any project with a new client name, answers 422 on `projectId` and stores nothing, not even the new client; so does an unknown project.
+
+A project groups several orders of one client, like the school's robotics kit. It needs `name` and a client (`clientId`, or a `client` name, matched or created as for an order); `dueDate` (`YYYY-MM-DD`) and `note` are optional, and `status` is `activo` (the default) or `terminado`. An order is in at most one project, always one of its own client's: assigning an order of another client answers 422 on `projectId` and changes nothing, and the check is repeated in the same SQL statement that writes the link. For the same reason a project's client can change only while it has no orders (422 on `clientId` otherwise). Progress is delivered orders ÷ all orders (0 without orders); the totals add up the prices and deposits of its orders, and the balance is worked out as a client's (price minus deposit of the orders not marked paid). An active project past its due date shows as overdue. The order form and the order detail offer only the client's active projects (plus the order's current one); the API also accepts a finished project. The rules are in `shared/projects.ts`.
+
+```bash
+# Put order 0148 in the Kit robótica project (1), then take it out again
+curl -X PUT http://localhost:5173/api/orders/0148/project \
+  -H 'content-type: application/json' \
+  -d '{"projectId":1}'
+curl -X PUT http://localhost:5173/api/orders/0148/project \
+  -H 'content-type: application/json' \
+  -d '{"projectId":null}'
+```
 
 A client needs `name`. `phone`, `instagram` (stored without the `@`), `email` and `note` are optional. Total spent is the sum of the prices of delivered orders; balance owed adds price minus deposit over the orders not marked paid. The client page links the phone to `https://wa.me/<digits>` and the handle to `https://instagram.com/<handle>`.
 
@@ -191,9 +211,9 @@ Errors come back as JSON with an `error` message in Spanish, since the app shows
 | Status | When |
 |---|---|
 | 400 | The body is not JSON (for an edit, not a JSON object) |
-| 404 | The order, client, printer, spool, quote, print job, service task or route does not exist |
+| 404 | The order, client, project, printer, spool, quote, print job, service task or route does not exist |
 | 405 | The method is not allowed on that path |
-| 409 | The quote was already accepted, or is rejected, so it cannot be accepted or change status; or the printer already has service tasks, so the default plan is not added |
+| 409 | The quote was already accepted, or is rejected, so it cannot be accepted or change status; or the printer already has service tasks, so the default plan is not added; or a project changed client between the checks and the write of an order's project |
 | 422 | The data is missing or invalid (the answer adds `fields`, one message per field), or the stage does not exist |
 
 ## Deploy

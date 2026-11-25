@@ -20,6 +20,8 @@ export interface Order {
   client: string; // the client's name, read through the client record
   clientId: number | null; // null only for an old row the migration could not link
   quoteId: number | null; // the quote this order was accepted from, if any
+  projectId: number | null; // the project it belongs to, if any; always one of its client's
+  project: string | null; // that project's name, read through the project record
   channel: Channel;
   stage: Stage;
   dueDate: string | null; // YYYY-MM-DD

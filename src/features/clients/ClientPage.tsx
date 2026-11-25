@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import type { ClientSummary } from '../../../shared/clients';
 import type { Order } from '../../../shared/orders';
+import type { ProjectSummary } from '../../../shared/projects';
 import type { Quote } from '../../../shared/quotes';
 import { Icon } from '../../ui/Icon';
 import { ErrorBanner } from '../orders/components';
 import { isoDate } from '../orders/format';
+import { fetchClientProjects } from '../projects/api';
+import { ProjectRow } from '../projects/components';
 import { fetchClientQuotes } from '../quotes/api';
 import { QuoteRow } from '../quotes/components';
 import { fetchClient, updateClient } from './api';
@@ -13,6 +16,7 @@ import { ClientDialog, ClientOrderRow, ClientTotals, ContactLinks } from './comp
 import '../orders/orders.css';
 import './clients.css';
 import '../quotes/quotes.css';
+import '../projects/projects.css';
 
 type State =
   | { status: 'loading' }
@@ -28,6 +32,8 @@ export function ClientPage() {
   // Loaded on their own: the client page still works when they fail.
   const [quotes, setQuotes] = useState<Quote[] | null>(null);
   const [quotesError, setQuotesError] = useState<string | null>(null);
+  const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -38,6 +44,10 @@ export function ClientPage() {
     fetchClientQuotes(id).then(
       (list) => { if (alive) { setQuotes(list); setQuotesError(null); } },
       (e: Error) => { if (alive) setQuotesError(e.message); },
+    );
+    fetchClientProjects(id).then(
+      (list) => { if (alive) { setProjects(list); setProjectsError(null); } },
+      (e: Error) => { if (alive) setProjectsError(e.message); },
     );
     return () => { alive = false; };
   }, [id, attempt]);
@@ -81,6 +91,17 @@ export function ClientPage() {
             {state.orders.length === 0
               ? <p className="lane__empty">Todavía no tiene pedidos. Cargalo desde <Link to="/pedidos">Pedidos</Link> y elegí este cliente.</p>
               : <ul className="client-orders">{state.orders.map((o) => <ClientOrderRow key={o.id} order={o} today={today} />)}</ul>}
+          </section>
+
+          <section aria-labelledby="proyectos-cliente" className="client-page__orders">
+            <h2 id="proyectos-cliente" className="client-page__section">Proyectos</h2>
+            {projectsError && <ErrorBanner text={`No se pudieron cargar los proyectos: ${projectsError}`} onRetry={retry} />}
+            {projects && projects.length === 0 && (
+              <p className="lane__empty">Todavía no tiene proyectos. Crealo en <Link to="/proyectos">Proyectos</Link> para juntar varios de sus pedidos.</p>
+            )}
+            {projects && projects.length > 0 && (
+              <ul className="quote-rows">{projects.map((p) => <ProjectRow key={p.id} project={p} today={today} />)}</ul>
+            )}
           </section>
 
           <section aria-labelledby="presupuestos-cliente" className="client-page__orders">

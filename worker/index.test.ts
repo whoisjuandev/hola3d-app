@@ -44,6 +44,12 @@ describe('API dispatch', () => {
     expect(await get('/api/printers/1/service-plan')).toEqual({ status: 405, body: { error: 'Método no permitido.' } });
   });
 
+  it('sends project paths, and the project of an order, to the projects module', async () => {
+    expect(await get('/api/projects')).toEqual({ status: 200, body: { projects: [] } });
+    expect(await get('/api/projects/1')).toEqual({ status: 404, body: { error: 'No existe el proyecto 1.' } });
+    expect(await get('/api/orders/0142/project')).toEqual({ status: 405, body: { error: 'Método no permitido.' } });
+  });
+
   it('answers 404 when no module owns the path', async () => {
     expect(await get('/api/nada')).toEqual({ status: 404, body: { error: 'Esa ruta no existe.' } });
   });

@@ -20,7 +20,7 @@ const cafe: Client = { id: 1, name: 'Café Nube', phone: '+54 9 11 5555-0142', i
 const lucia: Client = { id: 2, name: 'Lucía M.', phone: '', instagram: '', email: '', note: '', createdAt: stamp, updatedAt: stamp };
 
 const existingOrder: Order = {
-  id: '0142', item: 'Maceta', client: 'Café Nube', clientId: 1, quoteId: null, channel: 'Instagram', stage: 'imprimiendo',
+  id: '0142', item: 'Maceta', client: 'Café Nube', clientId: 1, quoteId: null, projectId: null, project: null, channel: 'Instagram', stage: 'imprimiendo',
   dueDate: null, dueTime: null, price: 12000, deposit: null, paid: false, material: '', note: '', createdAt: stamp, updatedAt: stamp,
   realCost: null, realProfit: null,
 };
@@ -288,7 +288,7 @@ describe('POST /api/quotes/:id/accept', () => {
       { id: '0143', item: 'Llavero con logo × 12', price: 21200 },
       { id: '0144', item: 'Cartel', price: 5000 },
     ].map((o) => ({
-      ...o, client: 'Café Nube', clientId: 1, quoteId: 1, channel: 'Instagram', stage: 'nuevo', dueDate: null, dueTime: null,
+      ...o, client: 'Café Nube', clientId: 1, quoteId: 1, projectId: null, project: null, channel: 'Instagram', stage: 'nuevo', dueDate: null, dueTime: null,
       deposit: null, paid: false, material: '', note: '', createdAt: expect.any(String), updatedAt: expect.any(String),
       realCost: null, realProfit: null,
     }));

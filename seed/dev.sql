@@ -1,10 +1,11 @@
--- Sample clients, quotes, orders, printers, spools, print jobs, service tasks and logs, and cost settings for local
+-- Sample clients, projects, quotes, orders, printers, spools, print jobs, service tasks and logs, and cost settings for local
 -- development only (npm run db:seed). Never run against production. Contact details are made up.
 DELETE FROM service_logs;
 DELETE FROM service_tasks;
 DELETE FROM print_job_filaments;
 DELETE FROM print_jobs;
 DELETE FROM orders;
+DELETE FROM projects;
 DELETE FROM quotes;
 DELETE FROM clients;
 DELETE FROM printers;
@@ -18,6 +19,11 @@ INSERT INTO clients (id, name, phone, instagram, email, note, created_at, update
 (6, 'Martín R.', '+54 9 11 5555-0145', 'martin.setup', '', '', '2026-11-18T12:00:00Z', '2026-11-18T12:00:00Z'),
 (7, 'Sofía P.', '+54 9 11 5555-0146', '', '', 'Retira en persona.', '2026-11-19T12:00:00Z', '2026-11-19T12:00:00Z'),
 (8, 'Bruno A.', '+54 9 11 5555-0147', 'bruno.cosplay', '', 'Preguntó por un casco de cosplay. Todavía sin pedido.', '2026-11-21T12:00:00Z', '2026-11-21T12:00:00Z');
+
+-- Projects: the school's robotics kit, still open, and Tomás's dragon, finished and delivered.
+INSERT INTO projects (id, name, client_id, status, due_date, note, created_at, updated_at) VALUES
+(1, 'Kit robótica', 5, 'activo', '2026-12-05', 'Piezas para los kits del taller de robótica de la escuela. Factura a nombre de la cooperadora.', '2026-11-12T12:00:00Z', '2026-11-12T12:00:00Z'),
+(2, 'Dragón articulado', 1, 'terminado', '2026-11-17', 'Figura de regalo. Ya entregada.', '2026-11-05T12:00:00Z', '2026-11-17T12:00:00Z');
 
 -- Quotes with their calculator input and result frozen as JSON (made with calculateCost). P-0001 was priced with the
 -- costs the shop had before the 2026-11-20 update, so it does not match what the calculator says today: that is the point.
@@ -46,6 +52,10 @@ INSERT INTO orders (id, item, client, client_id, channel, stage, due_date, due_t
 
 -- Order 0142 is the accepted quote P-0001 (one line, at its frozen price).
 UPDATE orders SET quote_id = 1 WHERE id = '0142';
+
+-- The robotics pieces are the Kit robótica project; the dragon figure is the finished project.
+UPDATE orders SET project_id = 1 WHERE id = '0144';
+UPDATE orders SET project_id = 2 WHERE id = '0140';
 
 -- Printer minutes and spool grams as they were before the print jobs below; the jobs then add and subtract theirs.
 INSERT INTO printers (id, name, model, purchase_price, lifetime_hours, power_watts, print_minutes, status, note, created_at, updated_at) VALUES

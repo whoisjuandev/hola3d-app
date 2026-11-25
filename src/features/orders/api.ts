@@ -8,7 +8,10 @@ export async function fetchOrders(): Promise<Order[]> {
   return (await request<{ orders: Order[] }>('/api/orders')).orders;
 }
 
-export async function createOrder(input: Partial<NewOrder>): Promise<Order> {
+/** A new order as the form sends it: the order fields, and optionally the project it goes in. */
+export type NewOrderInput = Partial<NewOrder> & { projectId?: number };
+
+export async function createOrder(input: NewOrderInput): Promise<Order> {
   return (await request<{ order: Order }>('/api/orders', { method: 'POST', body: JSON.stringify(input) })).order;
 }
 

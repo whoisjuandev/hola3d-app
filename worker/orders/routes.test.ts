@@ -5,6 +5,7 @@ import type { Printer } from '../../shared/printers';
 import type { Spool } from '../../shared/spools';
 import { memoryClientRepository } from '../clients/repository';
 import { memoryTables } from '../memory';
+import { memoryProjectRepository } from '../projects/repository';
 import { memoryOrderRepository } from './repository';
 import { handleOrders } from './routes';
 
@@ -14,7 +15,7 @@ const cafe: Client = {
 };
 
 const base: Order = {
-  id: '0142', item: 'Llaveros con logo × 12', client: 'Café Nube', clientId: 1, quoteId: null, channel: 'Instagram', stage: 'imprimiendo',
+  id: '0142', item: 'Llaveros con logo × 12', client: 'Café Nube', clientId: 1, quoteId: null, projectId: null, project: null, channel: 'Instagram', stage: 'imprimiendo',
   dueDate: '2026-11-23', dueTime: null, price: 36000, deposit: 18000, paid: false, material: 'PLA', note: '',
   createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z', realCost: null, realProfit: null,
 };
@@ -25,7 +26,7 @@ function call(method: string, path: string, body?: unknown) {
   const clients = memoryClientRepository(tables);
   const url = new URL(`https://app.test${path}`);
   const request = new Request(url, { method, body: body === undefined ? undefined : JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
-  return { repo, clients, run: () => handleOrders(request, url, repo, clients) };
+  return { repo, clients, run: () => handleOrders(request, url, repo, clients, memoryProjectRepository(tables)) };
 }
 
 async function read(res: Response | null) {
@@ -66,7 +67,7 @@ describe('GET /api/orders', () => {
     const other = { ...base, id: '0143' };
     const tables = memoryTables([cafe], [base, other], [], { printers: [a1], spools: [white], printJobs: [job, failed] });
     const url = new URL('https://app.test/api/orders');
-    const res = await handleOrders(new Request(url), url, memoryOrderRepository(tables), memoryClientRepository(tables));
+    const res = await handleOrders(new Request(url), url, memoryOrderRepository(tables), memoryClientRepository(tables), memoryProjectRepository(tables));
     // Job 1: 756 + 40 + 288 + 1200 + labour 3000 + extra 900 = 6184. Job 2 (failed): 210 + 20 + 144 + 600 = 974.
     // Real cost 7158; profit 36000 − 7158 = 28842.
     expect(await read(res)).toEqual({
@@ -161,7 +162,7 @@ describe('PUT /api/orders/:id/stage', () => {
     const repo = memoryOrderRepository(tables);
     const url = new URL('https://app.test/api/orders/10000/stage');
     const request = new Request(url, { method: 'PUT', body: JSON.stringify({ stage: 'listo' }) });
-    const { status, body } = await read(await handleOrders(request, url, repo, memoryClientRepository(tables)));
+    const { status, body } = await read(await handleOrders(request, url, repo, memoryClientRepository(tables), memoryProjectRepository(tables)));
     expect(status).toBe(200);
     expect((body.order as Order).stage).toBe('listo');
     expect((await repo.get('10000'))?.stage).toBe('listo');

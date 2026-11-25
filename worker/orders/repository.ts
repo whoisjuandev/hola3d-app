@@ -7,15 +7,27 @@ import { d1RealCosts, memoryRealCost } from '../print-jobs/repository';
 /** What storage needs to create an order: the validated request with its client already resolved to an id. */
 export type OrderInput = Omit<NewOrder, 'client' | 'clientId'>;
 
+/** An order as read, before its real cost is added. */
+type ReadOrder = Omit<Order, 'realCost' | 'realProfit'>;
+
 /** Port: what the order routes need from storage. */
 export interface OrderRepository {
   list(): Promise<Order[]>;
   listByClient(clientId: number): Promise<Order[]>;
   listByQuote(quoteId: number): Promise<Order[]>;
+  listByProject(projectId: number): Promise<Order[]>;
   get(id: string): Promise<Order | null>;
-  /** `clientId` must be an existing client. */
-  create(input: OrderInput, clientId: number): Promise<Order>;
+  /**
+   * `clientId` must be an existing client. With `projectId`, the order goes in that project only while it is a project
+   * of that client; otherwise returns null having written nothing.
+   */
+  create(input: OrderInput, clientId: number, projectId?: number | null): Promise<Order | null>;
   setStage(id: string, stage: Stage): Promise<Order | null>;
+  /**
+   * Put the order in a project, or take it out of any with null. Only into a project of the order's client; otherwise
+   * (or when the order does not exist) returns null having written nothing.
+   */
+  setProject(id: string, projectId: number | null): Promise<Order | null>;
 }
 
 interface OrderRow {
@@ -25,6 +37,8 @@ interface OrderRow {
   client_id: number | null;
   client_name: string | null;
   quote_id: number | null;
+  project_id: number | null;
+  project_name: string | null;
   channel: string;
   stage: string;
   due_date: string | null;
@@ -39,11 +53,11 @@ interface OrderRow {
 }
 
 /** The order with its real cost (from its print jobs) and real profit; both null while it has no printed job. */
-function withRealCost(order: StoredOrder, cost: RealCost | null): Order {
+function withRealCost(order: ReadOrder, cost: RealCost | null): Order {
   return { ...order, realCost: cost === null ? null : cost.total, realProfit: realProfit(order.price, cost) };
 }
 
-function toOrder(row: OrderRow): StoredOrder {
+function toOrder(row: OrderRow): ReadOrder {
   return {
     id: row.id,
     item: row.item,
@@ -51,6 +65,8 @@ function toOrder(row: OrderRow): StoredOrder {
     client: row.client_name ?? row.client,
     clientId: row.client_id,
     quoteId: row.quote_id,
+    projectId: row.project_id,
+    project: row.project_id === null ? null : row.project_name,
     channel: row.channel as Channel,
     stage: row.stage as Stage,
     dueDate: row.due_date,
@@ -65,7 +81,8 @@ function toOrder(row: OrderRow): StoredOrder {
   };
 }
 
-const SELECT = 'SELECT orders.*, clients.name AS client_name FROM orders LEFT JOIN clients ON clients.id = orders.client_id';
+const SELECT = `SELECT orders.*, clients.name AS client_name, projects.name AS project_name FROM orders
+  LEFT JOIN clients ON clients.id = orders.client_id LEFT JOIN projects ON projects.id = orders.project_id`;
 const ORDER_BY = 'ORDER BY orders.due_date IS NULL, orders.due_date, orders.due_time, CAST(orders.id AS INTEGER)';
 
 /** A condition an insert must meet, as SQL with its parameters. */
@@ -80,20 +97,26 @@ export interface InsertCondition {
  * column is NOT NULL, so it gets the client's current name. With `when`, nothing is inserted unless it holds.
  */
 export function insertOrderStatement(
-  db: D1Database, input: OrderInput, clientId: number, options: { now: string; quoteId?: number | null; when?: InsertCondition },
+  db: D1Database, input: OrderInput, clientId: number,
+  options: { now: string; quoteId?: number | null; projectId?: number | null; when?: InsertCondition },
 ): D1PreparedStatement {
-  const { now, quoteId = null, when } = options;
+  const { now, quoteId = null, projectId = null, when } = options;
   return db
     .prepare(
-      `INSERT INTO orders (id, item, client, client_id, quote_id, channel, stage, due_date, due_time, price, deposit, paid, material, note, created_at, updated_at)
-       SELECT printf('%04d', COALESCE((SELECT MAX(CAST(id AS INTEGER)) FROM orders), 0) + 1), ?, (SELECT name FROM clients WHERE id = ?), ?, ?, ?, 'nuevo', ?, ?, ?, ?, 0, ?, ?, ?, ?
+      `INSERT INTO orders (id, item, client, client_id, quote_id, project_id, channel, stage, due_date, due_time, price, deposit, paid, material, note, created_at, updated_at)
+       SELECT printf('%04d', COALESCE((SELECT MAX(CAST(id AS INTEGER)) FROM orders), 0) + 1), ?, (SELECT name FROM clients WHERE id = ?), ?, ?, ?, ?, 'nuevo', ?, ?, ?, ?, 0, ?, ?, ?, ?
        ${when ? `WHERE ${when.sql}` : ''}
        RETURNING id`,
     )
     .bind(
-      input.item, clientId, clientId, quoteId, input.channel, input.dueDate, input.dueTime, input.price, input.deposit, input.material, input.note,
-      now, now, ...(when?.params ?? []),
+      input.item, clientId, clientId, quoteId, projectId, input.channel, input.dueDate, input.dueTime, input.price, input.deposit, input.material,
+      input.note, now, now, ...(when?.params ?? []),
     );
+}
+
+/** The condition that a project exists and belongs to the client, as SQL for an insert or update. */
+function projectOfClient(projectId: number, clientIdSql: string, params: unknown[] = []): InsertCondition {
+  return { sql: `EXISTS (SELECT 1 FROM projects WHERE projects.id = ? AND projects.client_id = ${clientIdSql})`, params: [projectId, ...params] };
 }
 
 /** Adapter: D1 storage. Orders sort by due date, undated ones last. */
@@ -126,11 +149,22 @@ export function d1OrderRepository(db: D1Database): OrderRepository {
       return read(results);
     },
 
+    async listByProject(projectId) {
+      const { results } = await db.prepare(`${SELECT} WHERE orders.project_id = ? ${ORDER_BY}`).bind(projectId).all<OrderRow>();
+      return read(results);
+    },
+
     get,
 
-    async create(input, clientId) {
-      const row = await insertOrderStatement(db, input, clientId, { now: new Date().toISOString() }).first<{ id: string }>();
-      const order = row && (await get(row.id));
+    async create(input, clientId, projectId = null) {
+      // The project check is part of the INSERT, so a project whose client changed meanwhile gets no order.
+      const when = projectId === null ? undefined : projectOfClient(projectId, '?', [clientId]);
+      const row = await insertOrderStatement(db, input, clientId, { now: new Date().toISOString(), projectId, when }).first<{ id: string }>();
+      if (!row) {
+        if (when) return null;
+        throw new Error('Insert returned no row');
+      }
+      const order = await get(row.id);
       if (!order) throw new Error('Insert returned no row');
       return order;
     },
@@ -142,21 +176,34 @@ export function d1OrderRepository(db: D1Database): OrderRepository {
         .first<{ id: string }>();
       return row ? get(row.id) : null;
     },
+
+    async setProject(id, projectId) {
+      // The client check is in the UPDATE itself, so it holds even if the project changed since the caller read it.
+      const guard = projectId === null ? { sql: '1', params: [] } : projectOfClient(projectId, 'orders.client_id');
+      const row = await db
+        .prepare(`UPDATE orders SET project_id = ?, updated_at = ? WHERE id = ? AND ${guard.sql} RETURNING id`)
+        .bind(projectId, new Date().toISOString(), id, ...guard.params)
+        .first<{ id: string }>();
+      return row ? get(row.id) : null;
+    },
   };
 }
 
-/** The order with its client's current name and its real cost, as the D1 adapter reads it. */
+/** The order with its client's and project's current names and its real cost, as the D1 adapter reads it. */
 export function memoryReadOrder(tables: MemoryTables, o: StoredOrder): Order {
   const name = o.clientId === null ? undefined : tables.clients.get(o.clientId)?.name;
-  return withRealCost(name === undefined ? o : { ...o, client: name }, memoryRealCost(tables, o.id));
+  const project = o.projectId === null ? null : tables.projects.get(o.projectId)?.name ?? null;
+  return withRealCost({ ...o, client: name ?? o.client, project }, memoryRealCost(tables, o.id));
 }
 
 /** Insert an order in the in-memory tables, numbered like the D1 adapter. Synchronous, so callers can stay atomic. */
-export function memoryInsertOrder(tables: MemoryTables, input: OrderInput, clientId: number, quoteId: number | null = null): Order {
+export function memoryInsertOrder(
+  tables: MemoryTables, input: OrderInput, clientId: number, quoteId: number | null = null, projectId: number | null = null,
+): Order {
   const max = Math.max(0, ...[...tables.orders.keys()].map(Number));
   const now = new Date().toISOString();
   const order: StoredOrder = {
-    ...input, id: formatOrderNumber(max + 1), client: '', clientId, quoteId, stage: 'nuevo', paid: false, createdAt: now, updatedAt: now,
+    ...input, id: formatOrderNumber(max + 1), client: '', clientId, quoteId, projectId, stage: 'nuevo', paid: false, createdAt: now, updatedAt: now,
   };
   tables.orders.set(order.id, order);
   return memoryReadOrder(tables, order);
@@ -164,8 +211,9 @@ export function memoryInsertOrder(tables: MemoryTables, input: OrderInput, clien
 
 /** Adapter: in-memory storage for tests. Shares its tables with the in-memory client and quote repositories. */
 export function memoryOrderRepository(tables: MemoryTables): OrderRepository {
-  const { orders } = tables;
+  const { orders, projects } = tables;
   const read = (o: StoredOrder): Order => memoryReadOrder(tables, o);
+  const ofClient = (projectId: number, clientId: number | null) => projects.get(projectId)?.clientId === clientId;
   return {
     async list() {
       return [...orders.values()].map(read);
@@ -176,17 +224,29 @@ export function memoryOrderRepository(tables: MemoryTables): OrderRepository {
     async listByQuote(quoteId) {
       return [...orders.values()].filter((o) => o.quoteId === quoteId).map(read);
     },
+    async listByProject(projectId) {
+      return [...orders.values()].filter((o) => o.projectId === projectId).map(read);
+    },
     async get(id) {
       const order = orders.get(id);
       return order ? read(order) : null;
     },
-    async create(input, clientId) {
-      return memoryInsertOrder(tables, input, clientId);
+    async create(input, clientId, projectId = null) {
+      if (projectId !== null && !ofClient(projectId, clientId)) return null;
+      return memoryInsertOrder(tables, input, clientId, null, projectId);
     },
     async setStage(id, stage) {
       const current = orders.get(id);
       if (!current) return null;
       const updated = { ...current, stage, updatedAt: new Date().toISOString() };
+      orders.set(id, updated);
+      return read(updated);
+    },
+    async setProject(id, projectId) {
+      // No await in here, so nothing can run between the check and the write.
+      const current = orders.get(id);
+      if (!current || (projectId !== null && !ofClient(projectId, current.clientId))) return null;
+      const updated = { ...current, projectId, updatedAt: new Date().toISOString() };
       orders.set(id, updated);
       return read(updated);
     },

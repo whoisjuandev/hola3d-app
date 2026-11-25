@@ -32,6 +32,12 @@
 .order-card__foot b { font-size: 14px; font-weight: 900; font-variant-numeric: tabular-nums; }
 .order-card__due { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--soft); }
 .order-card__due--late { color: var(--red); }
+/* The project of an order: a small label on its card. */
+.order-card__project {
+  display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; max-width: 100%; padding: 2px 8px;
+  border-radius: 999px; background: var(--yellow-soft); border: 1px solid var(--rule);
+  font-size: 11px; font-weight: 800; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* ---- List (phone) ---- */
 .pills-row { display: flex; gap: 8px; overflow-x: auto; margin: 0 -16px; padding: 2px 16px 6px; scrollbar-width: none; }
@@ -58,6 +64,8 @@
 .detail__facts dt { font-size: 13px; font-weight: 700; color: var(--soft); }
 .detail__facts dd { margin-top: 4px; font-weight: 800; }
 .detail__big { font-size: 20px; font-weight: 900 !important; font-variant-numeric: tabular-nums; }
+.detail__project { display: flex; flex-direction: column; gap: 6px; }
+.detail__project-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .detail__note { padding: 14px 16px; border-radius: 14px; border: 2px dashed var(--rule); font-size: 15px; line-height: 22px; }
 .detail__grip { width: 44px; height: 5px; border-radius: 999px; background: var(--rule); margin: 0 auto; }
 

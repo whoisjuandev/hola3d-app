@@ -9,6 +9,8 @@ import { ClientPage } from './features/clients/ClientPage';
 import { ClientsPage } from './features/clients/ClientsPage';
 import { OrdersPage } from './features/orders/OrdersPage';
 import { PrintersPage } from './features/printers/PrintersPage';
+import { ProjectPage } from './features/projects/ProjectPage';
+import { ProjectsPage } from './features/projects/ProjectsPage';
 import { QuotePage } from './features/quotes/QuotePage';
 import { QuotePrintPage } from './features/quotes/QuotePrintPage';
 import { QuotesPage } from './features/quotes/QuotesPage';
@@ -27,7 +29,8 @@ const router = createBrowserRouter([
       { path: 'clientes/:id', element: <ClientPage /> },
       { path: 'presupuestos', element: <QuotesPage /> },
       { path: 'presupuestos/:id', element: <QuotePage /> },
-      { path: 'proyectos', element: <ComingSoon title="Proyectos" /> },
+      { path: 'proyectos', element: <ProjectsPage /> },
+      { path: 'proyectos/:id', element: <ProjectPage /> },
       { path: 'agenda', element: <ComingSoon title="Agenda" /> },
       { path: 'taller', element: <ServicePage /> },
       { path: 'impresoras', element: <PrintersPage /> },

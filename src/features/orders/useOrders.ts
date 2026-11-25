@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { NewOrder, Order, Stage } from '../../../shared/orders';
+import type { Order, Stage } from '../../../shared/orders';
 import { STAGE_LABEL } from '../../../shared/orders';
-import { createOrder, fetchOrders, saveStage } from './api';
+import { createOrder, fetchOrders, saveStage, type NewOrderInput } from './api';
 
 export interface StageChange { id: string; from: Stage; to: Stage; text: string }
 
@@ -58,7 +58,7 @@ export function useOrders() {
     if (order) await move(order, lastChange.from, false);
   }, [lastChange, orders, move]);
 
-  const create = useCallback(async (input: Partial<NewOrder>) => {
+  const create = useCallback(async (input: NewOrderInput) => {
     const order = await createOrder(input);
     setOrders((list) => [...list, order]);
     return order;

@@ -1,13 +1,17 @@
 // Presentational pieces of the Pedidos screen. State lives in OrdersPage.
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import type { Channel, NewOrder, Order, Stage } from '../../../shared/orders';
+import type { Channel, Order, Stage } from '../../../shared/orders';
 import { CHANNELS, STAGES, STAGE_LABEL, nextStage, previousStage, stageIndex } from '../../../shared/orders';
+import { findClientByName } from '../../../shared/clients';
 import { Icon } from '../../ui/Icon';
 import { ClientPicker } from '../clients/ClientPicker';
 import { clientReference, usePickerClients } from '../clients/picker';
-import { ApiError } from './api';
+import { projectChoices } from '../projects/format';
+import { usePickerProjects } from '../projects/picker';
+import { ApiError, type NewOrderInput } from './api';
 import { depositLabel, dueLabel, isOverdue, money } from './format';
+import { OrderProject } from './OrderProject';
 import { PrintJobs } from './PrintJobs';
 
 const STAGE_COLOR: Record<Stage, { bg: string; fg: string }> = {
@@ -32,6 +36,7 @@ export function OrderCard({ order, today, selected, showStage, onSelect }: {
       <span className="order-card__meta"><span>#{order.id} · {order.channel}</span>{showStage && <StageChip stage={order.stage} />}</span>
       <span className="order-card__item">{order.item}</span>
       <span className="order-card__client">{order.client}</span>
+      {order.project && <span className="order-card__project"><Icon name="folder" size={12} />{order.project}</span>}
       <span className="order-card__foot">
         <span className={late ? 'order-card__due order-card__due--late' : 'order-card__due'}>
           <Icon name="calendar" size={14} />{dueLabel(order, today)}{late ? ' · atrasado' : ''}
@@ -133,6 +138,7 @@ export function OrderDetail({ order, today, asSheet, onMove, onOrderChange, onCl
           <div><dt>Precio</dt><dd className="detail__big">{money(order.price)}</dd></div>
           <div><dt>Seña</dt><dd className="detail__big">{depositLabel(order)}</dd></div>
         </dl>
+        <OrderProject key={`project-${order.id}`} order={order} onOrderChange={onOrderChange} />
         {order.note && <p className="detail__note">{order.note}</p>}
         <PrintJobs key={order.id} order={order} onOrderChange={onOrderChange} />
       </aside>
@@ -165,22 +171,29 @@ export function ErrorBanner({ text, onRetry, onDismiss }: { text: string; onRetr
   );
 }
 
-type FormState = Record<'item' | 'client' | 'channel' | 'dueDate' | 'dueTime' | 'price' | 'deposit' | 'material' | 'note', string>;
-const EMPTY: FormState = { item: '', client: '', channel: 'WhatsApp', dueDate: '', dueTime: '', price: '', deposit: '', material: '', note: '' };
+type FormState = Record<'item' | 'client' | 'projectId' | 'channel' | 'dueDate' | 'dueTime' | 'price' | 'deposit' | 'material' | 'note', string>;
+const EMPTY: FormState = {
+  item: '', client: '', projectId: '', channel: 'WhatsApp', dueDate: '', dueTime: '', price: '', deposit: '', material: '', note: '',
+};
 
 function toPesos(text: string): number | string {
   const digits = text.replace(/[.\s$]/g, '');
   return /^\d+$/.test(digits) ? Number(digits) : text;
 }
 
-export function NewOrderDialog({ onCreate, onClose }: { onCreate: (input: Partial<NewOrder>) => Promise<Order>; onClose: () => void }) {
+export function NewOrderDialog({ onCreate, onClose }: { onCreate: (input: NewOrderInput) => Promise<Order>; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [banner, setBanner] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const clients = usePickerClients();
+  const projects = usePickerProjects();
   const uid = useId();
+  // Only the active projects of a client picked from the list; a project picked for another client is dropped.
+  const pickedClient = findClientByName(clients, form.client);
+  const choices = projectChoices(projects, pickedClient?.id ?? null, null);
+  const projectId = choices.some((p) => String(p.id) === form.projectId) ? form.projectId : '';
 
   useEffect(() => {
     const dialog = ref.current;
@@ -195,11 +208,12 @@ export function NewOrderDialog({ onCreate, onClose }: { onCreate: (input: Partia
     setSaving(true);
     setBanner(null);
     try {
-      const { client, ...rest } = form;
+      const { client, projectId: _picked, ...rest } = form;
       await onCreate({
         ...rest,
         // A name from the list links that client; any other name creates a new one.
         ...clientReference(clients, client),
+        ...(projectId ? { projectId: Number(projectId) } : {}),
         channel: form.channel as Channel,
         dueDate: form.dueDate || null,
         dueTime: form.dueTime || null,
@@ -239,6 +253,22 @@ export function NewOrderDialog({ onCreate, onClose }: { onCreate: (input: Partia
           {field('item', 'Qué hay que hacer', { placeholder: 'Llaveros con logo × 12', autoFocus: true })}
           <ClientPicker id={`${uid}-client`} value={form.client} clients={clients} error={errors.client} saving="el pedido"
             onChange={(client) => setForm((f) => ({ ...f, client }))} />
+          <div className="field">
+            <label className="field__label" htmlFor={`${uid}-project`}>Proyecto (opcional)</label>
+            <select id={`${uid}-project`} className="field__control" value={projectId} onChange={set('projectId')} disabled={choices.length === 0}
+              aria-invalid={!!errors.projectId} aria-describedby={`${uid}-project-msg`}>
+              <option value="">Sin proyecto</option>
+              {choices.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            {errors.projectId
+              ? <span id={`${uid}-project-msg`} className="field__error">{errors.projectId}</span>
+              : (
+                <span id={`${uid}-project-msg`} className="muted" aria-live="polite">
+                  {!pickedClient ? 'Elegí un cliente de la lista para ver sus proyectos.'
+                    : choices.length === 0 ? 'Este cliente no tiene proyectos activos.' : 'Sumalo a un proyecto activo del cliente.'}
+                </span>
+              )}
+          </div>
           <div className="field">
             <label className="field__label" htmlFor={`${uid}-channel`}>Llegó por</label>
             <select id={`${uid}-channel`} className="field__control" value={form.channel} onChange={set('channel')}>
