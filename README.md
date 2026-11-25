@@ -2,6 +2,8 @@
 
 The internal workshop app for Hola3D, a 3D printing shop. It tracks every order from the first message to the delivery, on one board.
 
+![The home screen: overdue orders, what is due today, machine service, low spools, open quotes and the month's money](docs/inicio.png)
+
 ![The Pedidos board with orders grouped by stage](docs/pedidos.png)
 
 ## Status
