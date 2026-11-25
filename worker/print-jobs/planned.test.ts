@@ -326,25 +326,29 @@ describe('DELETE /api/orders/:id/jobs/:jobId/plan', () => {
 });
 
 describe('DELETE /api/orders/:id/jobs/:jobId on a planned job', () => {
-  it('answers 409 and keeps the planned job', async () => {
+  it('deletes the planned job and changes no counter', async () => {
     const { call, snapshot } = setup();
     const before = await snapshot();
-    expect(await call('DELETE', '/api/orders/0143/jobs/2')).toEqual({
-      status: 409, body: { error: 'La impresión 2 está planeada: se borra como plan.' },
-    });
-    expect(await snapshot()).toEqual(before);
+    const { status, body } = await call('DELETE', '/api/orders/0143/jobs/2');
+    expect(status).toBe(200);
+    expect(body.order).toMatchObject({ id: '0143' });
+    const after = await snapshot();
+    expect(after.printMinutes).toEqual(before.printMinutes);
+    expect(after.grams).toEqual(before.grams);
+    expect(after.otherJobs.jobs).toEqual([]);
+    expect(await call('DELETE', '/api/orders/0143/jobs/2')).toEqual({ status: 404, body: { error: 'El pedido #0143 no tiene la impresión 2.' } });
   });
 
-  it('answers 409, not 404, when the job is finished between the check and the answer', async () => {
+  it('answers 409 and keeps the finish when the job is finished between the read and the delete', async () => {
     let landFinish: (() => Promise<unknown>) | null = null;
     const racing = (repo: PrintJobRepository): PrintJobRepository => ({
       ...repo,
-      remove: async (orderId, jobId) => {
-        const removed = await repo.remove(orderId, jobId);
+      get: async (jobId) => {
+        const job = await repo.get(jobId);
         const land = landFinish;
         landFinish = null;
         if (land) await land();
-        return removed;
+        return job;
       },
     });
     const { call, snapshot } = setup({ jobs: racing });

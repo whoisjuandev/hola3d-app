@@ -70,28 +70,32 @@ export async function handlePrintJobs(request: Request, url: URL, deps: PrintJob
     const [, orderId, jobId] = jobMatch;
     if (request.method === 'PUT') return updatePlan(request, orderId, Number(jobId), deps);
     if (request.method !== 'DELETE') return notAllowed();
-    return removeFinished(orderId, Number(jobId), deps);
+    return removeJob(orderId, Number(jobId), deps);
   }
 
   return null;
 }
 
-const IS_PLANNED = (jobId: number) => `La impresión ${jobId} está planeada: se borra como plan.`;
 const CHANGED_WHILE_DELETING = (jobId: number) => `La impresión ${jobId} cambió mientras la borrabas: revisá y probá de nuevo.`;
 const FINISHED_NOT_DELETED = (jobId: number) => `La impresión ${jobId} ya se cargó como terminada: no se borró.`;
 
 /**
- * Delete a printed job and give its minutes and grams back, in one atomic write. A planned job is not deleted here
- * (409): it took nothing and is deleted as a plan. A job that exists never answers 404.
+ * Delete a job of the order. The status read here picks the guarded delete: a planned job is deleted as a plan and
+ * gives nothing back; a printed one gives its minutes and grams back in one atomic write. If the status changed
+ * before the delete ran (finished meanwhile), nothing is deleted and the answer is 409, never 404 for a job that exists.
  */
-async function removeFinished(orderId: string, jobId: number, deps: PrintJobDeps): Promise<Response> {
+async function removeJob(orderId: string, jobId: number, deps: PrintJobDeps): Promise<Response> {
   if (!(await deps.orders.get(orderId))) return orderNotFound(orderId);
-  if (await deps.jobs.remove(orderId, jobId)) return json({ order: await deps.orders.get(orderId) });
-  // The guarded delete found no printed job of the order. Read again to say why.
+  const job = await deps.jobs.get(jobId);
+  if (!job || job.orderId !== orderId) return jobNotFound(orderId, jobId);
+  const removed = job.status === 'planeada'
+    ? await deps.jobs.removePlanned(orderId, jobId)
+    : await deps.jobs.remove(orderId, jobId);
+  if (removed) return json({ order: await deps.orders.get(orderId) });
+  // The guarded delete did not apply. Gone: another request deleted it. Still there: its status changed meanwhile.
   const now = await deps.jobs.get(jobId);
   if (!now || now.orderId !== orderId) return jobNotFound(orderId, jobId);
-  // Planned: it cannot be deleted here. Printed now: it was finished between the delete and this read.
-  return problem(409, now.status === 'planeada' ? IS_PLANNED(jobId) : CHANGED_WHILE_DELETING(jobId));
+  return problem(409, CHANGED_WHILE_DELETING(jobId));
 }
 
 /** Delete a planned job, only while it is planned: one that was finished meanwhile keeps its counters (409). */
