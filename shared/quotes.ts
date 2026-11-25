@@ -1,6 +1,6 @@
 // Quotes: a calculation saved for a client, with its price frozen. Shared by the Worker API and the React app.
 import type { CalcInput, CalcLineInput, CalcPrinter, CalcResult, CalcSpool, FilamentUseInput } from './calculator';
-import { readPhone, whatsappUrl } from './clients';
+import { clientNameKey, readPhone, whatsappUrl } from './clients';
 import { asBody, isMissing, readText, type Body, type Errors } from './fields';
 import { CHANNELS, type Channel, type NewOrder, type ValidationResult } from './orders';
 import { readProfitChoice } from './profit';
@@ -129,6 +129,26 @@ function readShowBreakdown(body: Body, errors: Errors): boolean {
   return raw === true;
 }
 
+const ONE_LINE = 'Escribilo en una línea, sin caracteres invisibles.';
+
+/** A control character (C0, DEL or C1): a NUL, a line break, a tab, an escape. */
+function isControl(char: string): boolean {
+  const code = char.codePointAt(0) ?? 0;
+  return code < 0x20 || (code >= 0x7f && code <= 0x9f);
+}
+
+/**
+ * Text stored as one line, like a title or a recipient name: as readText, and without control characters. A NUL also
+ * matters to the table: SQLite's length() stops at it, so a recipient name of one NUL would pass here as one character
+ * and fail the CHECK that asks for a non-empty name. JavaScript's trim removes every space SQLite's trim removes (and
+ * more), so a name that is not empty here is not empty there either.
+ */
+function readOneLine(body: Body, errors: Errors, key: string, max: number, required: boolean): string {
+  const value = readText(body, errors, key, max, required);
+  if (!errors[key] && [...value].some(isControl)) errors[key] = ONE_LINE;
+  return value;
+}
+
 const MAX_LINES = 30;
 const MAX_FILAMENTS = 10;
 const MAX_NAME = 100; // leaves room for " × quantity" in the 120 characters of an order item
@@ -230,9 +250,9 @@ export function validateNewQuote(input: unknown): ValidationResult<NewQuote> {
 
   const quick = isMissing(body.clientId) && isMissing(body.client) && Object.hasOwn(body, 'recipientName');
   const { client, clientId } = quick ? { client: '', clientId: null } : readClientReference(body, errors);
-  const recipientName = quick ? readText(body, errors, 'recipientName', 80, true) : '';
+  const recipientName = quick ? readOneLine(body, errors, 'recipientName', 80, true) : '';
   const recipientPhone = quick ? readPhone(body, errors, 'recipientPhone') : '';
-  const title = readText(body, errors, 'title', 120, true);
+  const title = readOneLine(body, errors, 'title', 120, true);
   const validUntil = readValidUntil(body, errors);
   const note = readText(body, errors, 'note', 1000, false);
   const showBreakdown = readShowBreakdown(body, errors);
@@ -274,16 +294,47 @@ export function missingReferences(input: CalcInput, printers: Pick<CalcPrinter, 
 export function validateQuoteChanges(input: unknown, needsRecipient: boolean): ValidationResult<QuoteChanges> {
   const errors: Errors = {};
   const body = asBody(input);
-  const title = readText(body, errors, 'title', 120, true);
+  const title = readOneLine(body, errors, 'title', 120, true);
   const validUntil = readValidUntil(body, errors);
   const note = readText(body, errors, 'note', 1000, false);
   const status = body.status;
   if (!isQuoteStatus(status)) errors.status = 'Ese estado no existe.';
-  const recipientName = readText(body, errors, 'recipientName', 80, needsRecipient);
+  const recipientName = readOneLine(body, errors, 'recipientName', 80, needsRecipient);
   const recipientPhone = readPhone(body, errors, 'recipientPhone');
   const showBreakdown = readShowBreakdown(body, errors);
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, value: { title, validUntil, note, status: status as QuoteStatus, recipientName, recipientPhone, showBreakdown } };
+}
+
+const RECIPIENT_KEYS = ['recipientName', 'recipientPhone'] as const;
+const CLIENT_HAS_CONTACT = 'Este presupuesto tiene cliente: se usan su nombre y su teléfono.';
+
+/**
+ * The recipient fields belong to quotes without a client: an edit of a quote that has one (`hasClient`) may not send
+ * them, whatever their value. The errors of the ones `sent`; empty when there are none.
+ */
+export function recipientFieldErrors(sent: unknown, hasClient: boolean): Errors {
+  if (!hasClient) return {};
+  const body = asBody(sent);
+  return Object.fromEntries(RECIPIENT_KEYS.filter((key) => Object.hasOwn(body, key)).map((key) => [key, CLIENT_HAS_CONTACT]));
+}
+
+/**
+ * Whether a create request is a retry of the save that stored `quote` under the same submission key: the same recipient
+ * (a quick quote) or the same client (by id, or by name as the client picker matches names), and the same calculator
+ * input. The other fields (title, note, validity, phone, switch) may have changed in the form since; the quote is
+ * answered as it was stored.
+ */
+export function isSameQuoteSave(
+  quote: Pick<Quote, 'clientId' | 'client' | 'recipientName' | 'input'>, sent: NewQuote,
+): boolean {
+  const quick = sent.clientId === null && sent.client === '';
+  const sameParty = quick
+    ? quote.recipientName === sent.recipientName
+    : quote.recipientName === '' && (sent.clientId !== null
+      ? quote.clientId === sent.clientId
+      : quote.client !== null && clientNameKey(quote.client) === clientNameKey(sent.client));
+  return sameParty && JSON.stringify(quote.input) === JSON.stringify(sent.input);
 }
 
 /**
@@ -328,13 +379,14 @@ export function ordersFromQuote(quote: Pick<Quote, 'result'>, channel: Channel):
 type MessageQuote = Pick<Quote, 'number' | 'title' | 'client' | 'recipientName' | 'result' | 'total' | 'validUntil' | 'note'>;
 
 /**
- * Who a quote is for and where to write: the client's name, or the recipient written on a quick quote; the client's
- * phone, or the recipient's when the quote has no client or its client has no phone.
+ * Who a quote is for and where to write: a quote with a client uses the client's name and phone ('' when the client
+ * has none or is not loaded), never the recipient fields; a quick quote without a client uses its recipient's.
  */
 export function quoteContact(
   quote: Pick<Quote, 'client' | 'recipientName' | 'recipientPhone'>, client: { phone: string } | null,
 ): { name: string; phone: string } {
-  return { name: quote.client ?? quote.recipientName, phone: client?.phone || quote.recipientPhone };
+  if (quote.client !== null) return { name: quote.client, phone: client?.phone ?? '' };
+  return { name: quote.recipientName, phone: quote.recipientPhone };
 }
 
 /** The ready WhatsApp message: the items, the total and the validity date if there is one, then the note if there is one. */

@@ -7,6 +7,12 @@ export interface ClientRepository {
   get(id: number): Promise<Client | null>;
   create(input: ClientInput): Promise<Client>;
   update(id: number, input: ClientInput): Promise<Client | null>;
+  /**
+   * Deletes the client only while no order, quote or project refers to it, decided in one statement. For a client a
+   * request created for a write that was then refused, so the refused write leaves no client behind. True when it was
+   * deleted.
+   */
+  removeIfUnused(id: number): Promise<boolean>;
 }
 
 interface ClientRow {
@@ -71,6 +77,21 @@ export function d1ClientRepository(db: D1Database): ClientRepository {
         .first<ClientRow>();
       return row ? toClient(row) : null;
     },
+
+    async removeIfUnused(id) {
+      // The checks are in the DELETE itself, so a reference written since the caller decided keeps the client.
+      const row = await db
+        .prepare(
+          `DELETE FROM clients WHERE id = ?
+             AND NOT EXISTS (SELECT 1 FROM orders WHERE client_id = ?)
+             AND NOT EXISTS (SELECT 1 FROM quotes WHERE client_id = ?)
+             AND NOT EXISTS (SELECT 1 FROM projects WHERE client_id = ?)
+           RETURNING id`,
+        )
+        .bind(id, id, id, id)
+        .first<{ id: number }>();
+      return row !== null;
+    },
   };
 }
 
@@ -97,6 +118,12 @@ export function memoryClientRepository(tables: MemoryTables): ClientRepository {
       const updated: Client = { ...current, ...input, updatedAt: new Date().toISOString() };
       clients.set(id, updated);
       return updated;
+    },
+    async removeIfUnused(id) {
+      // No await in here, so nothing can run between the check and the delete.
+      const refers = (rows: Iterable<{ clientId: number | null }>) => [...rows].some((row) => row.clientId === id);
+      if (!clients.has(id) || refers(tables.orders.values()) || refers(tables.quotes.values()) || refers(tables.projects.values())) return false;
+      return clients.delete(id);
     },
   };
 }

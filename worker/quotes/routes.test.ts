@@ -567,6 +567,120 @@ describe('quick quotes (no client)', () => {
     expect(await clients.list()).toEqual([cafe, lucia]);
   });
 
+  it('creates a client only for the winning accept', async () => {
+    const { call, clients, quotes, orders } = setup([quick]);
+    const before = await clients.list();
+    const responses = await Promise.all(['Alba', 'Sol'].map((client) => call('POST', '/api/quotes/3/accept', { client })));
+    expect(responses.map((r) => r.status).sort()).toEqual([201, 409]);
+    const winner = (await quotes.get(3))!.clientId;
+    const created = (await clients.list()).filter((c) => !before.some((b) => b.id === c.id));
+    expect(created.map((c) => [c.id, c.phone])).toEqual([[winner, quick.recipientPhone]]);
+    expect((await orders.listByQuote(3)).map((o) => o.clientId)).toEqual([winner, winner]);
+  });
+
+  it('a refused accept removes the client it created, even when it read the quote open before the winner wrote', async () => {
+    const { call, clients, quotes, orders } = setup([quick]);
+    // The first accept stops right before its write until the second one has answered.
+    const accept = quotes.accept.bind(quotes);
+    let reached!: () => void;
+    let release!: () => void;
+    const atWrite = new Promise<void>((resolve) => { reached = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    quotes.accept = async (...args) => {
+      if (calls++ === 0) {
+        reached();
+        await gate;
+      }
+      return accept(...args);
+    };
+    const first = call('POST', '/api/quotes/3/accept', { client: 'Alba' });
+    await atWrite;
+    expect((await clients.list()).map((c) => c.name)).toEqual(['Café Nube', 'Lucía M.', 'Alba']);
+    const second = await call('POST', '/api/quotes/3/accept', { client: 'Sol' });
+    release();
+    expect(second.status).toBe(201);
+    expect(await first).toEqual({ status: 409, body: { error: 'El presupuesto P-0003 ya no se puede aceptar: recargá la página.' } });
+    const sol = (await clients.list()).find((c) => c.name === 'Sol')!;
+    expect(await clients.list()).toEqual([cafe, lucia, sol]);
+    expect(await quotes.get(3)).toMatchObject({ clientId: sol.id, status: 'aceptado' });
+    expect((await orders.listByQuote(3)).map((o) => o.clientId)).toEqual([sol.id, sol.id]);
+  });
+
+  it('a refused accept leaves a client of the list it named as it was', async () => {
+    const { call, clients, quotes } = setup([quick]);
+    const answers = await Promise.all([{ client: 'lucía m.' }, { client: 'Alba' }].map((body) => call('POST', '/api/quotes/3/accept', body)));
+    expect(answers.map((a) => a.status).sort()).toEqual([201, 409]);
+    const { clientId } = (await quotes.get(3))!;
+    expect((await clients.list()).map((c) => c.name)).toEqual(clientId === 2 ? ['Café Nube', 'Lucía M.'] : ['Café Nube', 'Lucía M.', 'Alba']);
+    expect(await clients.get(2)).toEqual(lucia);
+  });
+
+  it('rejects a NUL recipient before the database CHECK', async () => {
+    const { call, quotes } = setup([quick]);
+    const before = await quotes.get(3);
+    const response = await call('PUT', '/api/quotes/3', { recipientName: '\u0000' });
+    expect(response.status).toBe(422);
+    expect(response.body.fields).toHaveProperty('recipientName');
+    expect(await quotes.get(3)).toEqual(before);
+  });
+
+  it('rejects a recipient name or title with control characters on create and edit with 422, storing nothing', async () => {
+    const { call, quotes, clients } = setup([quick]);
+    const message = 'Escribilo en una línea, sin caracteres invisibles.';
+    expect(await call('POST', '/api/quotes', { ...newQuick, recipientName: '\u0000', title: 'Llave\u0000ros' })).toEqual({
+      status: 422, body: { error: 'Revisá los datos del presupuesto.', fields: { recipientName: message, title: message } },
+    });
+    expect(await call('POST', '/api/quotes', { ...newQuote, title: '\u0000' })).toEqual({
+      status: 422, body: { error: 'Revisá los datos del presupuesto.', fields: { title: message } },
+    });
+    expect(await call('PUT', '/api/quotes/3', { recipientName: 'Juan\nPérez', title: '\u0000' })).toEqual({
+      status: 422, body: { error: 'Revisá los datos del presupuesto.', fields: { recipientName: message, title: message } },
+    });
+    expect(await call('PUT', '/api/quotes/1', { title: '\u0000' })).toEqual({
+      status: 422, body: { error: 'Revisá los datos del presupuesto.', fields: { title: message } },
+    });
+    expect(await quotes.list()).toEqual([quick, rejected, sent]);
+    expect(await clients.list()).toEqual([cafe, lucia]);
+  });
+
+  it('a quote with a client does not take the recipient fields: 422 on them, writing nothing', async () => {
+    const { call, quotes } = setup([{ ...quick, id: 4, number: 'P-0004', clientId: 2, client: 'Lucía M.', status: 'aceptado' }]);
+    const message = 'Este presupuesto tiene cliente: se usan su nombre y su teléfono.';
+    const before = await quotes.list();
+    expect(await call('PUT', '/api/quotes/1', { recipientName: 'Juan', recipientPhone: '+54 9 11 5555-0199', title: 'Otro' })).toEqual({
+      status: 422, body: { error: 'Revisá los datos del presupuesto.', fields: { recipientName: message, recipientPhone: message } },
+    });
+    expect(await call('PUT', '/api/quotes/1', { recipientPhone: '' })).toEqual({
+      status: 422, body: { error: 'Revisá los datos del presupuesto.', fields: { recipientPhone: message } },
+    });
+    // An accepted quick quote has a client now: its recipient stays as it was saved.
+    expect(await call('PUT', '/api/quotes/4', { recipientName: 'Juan P.' })).toEqual({
+      status: 422, body: { error: 'Revisá los datos del presupuesto.', fields: { recipientName: message } },
+    });
+    expect(await quotes.list()).toEqual(before);
+    // Its other fields still change.
+    expect((await call('PUT', '/api/quotes/4', { note: 'Pagó la seña.' })).body.quote).toMatchObject({ note: 'Pagó la seña.', recipientName: 'Juan Pérez' });
+  });
+
+  it('a recipient edit that an accept overtakes answers 422 and writes nothing', async () => {
+    const { call, quotes } = setup([quick]);
+    const get = quotes.get.bind(quotes);
+    // The edit reads the quote without a client; an accept for Lucía lands before its write.
+    quotes.get = async (id) => {
+      const read = await get(id);
+      quotes.get = get;
+      await quotes.accept(3, 2, []);
+      return read;
+    };
+    const accepted = await get(3);
+    expect(accepted).toEqual(quick);
+    const { status, body } = await call('PUT', '/api/quotes/3', { recipientName: 'Juan P.' });
+    expect(status).toBe(422);
+    expect(body.fields).toEqual({ recipientName: 'Este presupuesto tiene cliente: se usan su nombre y su teléfono.' });
+    expect(await quotes.get(3)).toMatchObject({ clientId: 2, recipientName: 'Juan Pérez', status: 'aceptado' });
+  });
+
   it('accepting a quote with a client ignores a client sent in the body, as before', async () => {
     const { call, clients } = setup();
     const { status, body } = await call('POST', '/api/quotes/1/accept', { clientId: 'dos', client: 'Otro cliente' });
@@ -574,5 +688,99 @@ describe('quick quotes (no client)', () => {
     expect(body.quote).toMatchObject({ clientId: 1, client: 'Café Nube' });
     expect((body.orders as Order[]).map((o) => o.clientId)).toEqual([1, 1]);
     expect(await clients.list()).toEqual([cafe, lucia]);
+  });
+});
+
+describe('saving with a submission key', () => {
+  const juan = { recipientName: 'Juan Pérez', recipientPhone: '+54 9 11 5555-0199' };
+  const newQuick = { ...juan, title: 'Llaveros para Juan', note: 'Entrega en 5 días.', showBreakdown: true, status: 'enviado', input };
+  const key = 'f3b0c442-98fc-4c1c-a3e6-6f2d5b8e9a01';
+
+  it('stores the quote once: the same save again answers it with 200 and stores nothing', async () => {
+    const { call, quotes, clients } = setup();
+    const first = await call('POST', '/api/quotes', { ...newQuick, submissionKey: key });
+    expect(first.status).toBe(201);
+    expect(first.body.quote).toEqual({
+      id: 3, number: 'P-0003', clientId: null, client: null, ...juan, title: 'Llaveros para Juan', status: 'enviado', validUntil: null,
+      showBreakdown: true, input, result: priced, total: 26200, note: 'Entrega en 5 días.', createdAt: expect.any(String), updatedAt: expect.any(String),
+    });
+    const stored = await quotes.list();
+    expect(await call('POST', '/api/quotes', { ...newQuick, submissionKey: key })).toEqual({ status: 200, body: { quote: first.body.quote } });
+    // Other fields may have changed in the form since: the answer is the quote as it was stored.
+    expect(await call('POST', '/api/quotes', { ...newQuick, title: 'Otro título', recipientPhone: '', submissionKey: key }))
+      .toEqual({ status: 200, body: { quote: first.body.quote } });
+    expect(await quotes.list()).toEqual(stored);
+    expect(await clients.list()).toEqual([cafe, lucia]);
+  });
+
+  it('answers 409 and stores nothing when the key was used for another recipient, client or input', async () => {
+    const { call, quotes, clients } = setup();
+    await call('POST', '/api/quotes', { ...newQuick, submissionKey: key });
+    const stored = await quotes.list();
+    const conflict = { status: 409, body: { error: 'Esa clave de envío ya se usó para el presupuesto P-0003, con otros datos: revisalo en Presupuestos.' } };
+    expect(await call('POST', '/api/quotes', { ...newQuick, recipientName: 'Juan P.', submissionKey: key })).toEqual(conflict);
+    expect(await call('POST', '/api/quotes', { ...newQuick, input: { lines: [sign] }, submissionKey: key })).toEqual(conflict);
+    expect(await call('POST', '/api/quotes', { ...newQuote, submissionKey: key })).toEqual(conflict);
+    const { clientId: _id, ...byName } = newQuote;
+    expect(await call('POST', '/api/quotes', { ...byName, client: 'Bruno A.', submissionKey: key })).toEqual(conflict);
+    expect(await quotes.list()).toEqual(stored);
+    expect(await clients.list()).toEqual([cafe, lucia]);
+  });
+
+  it('answers a save for a client named as text again, without creating the client twice', async () => {
+    const { call, quotes, clients } = setup();
+    const { clientId: _id, ...byName } = newQuote;
+    const first = await call('POST', '/api/quotes', { ...byName, client: 'Bruno A.', submissionKey: key });
+    expect(first.body.quote).toMatchObject({ clientId: 3, client: 'Bruno A.' });
+    expect(await call('POST', '/api/quotes', { ...byName, client: ' bruno a. ', submissionKey: key })).toEqual({ status: 200, body: { quote: first.body.quote } });
+    expect(await call('POST', '/api/quotes', { ...newQuote, clientId: 3, submissionKey: key })).toEqual({ status: 200, body: { quote: first.body.quote } });
+    expect((await quotes.list()).map((q) => q.id)).toEqual([3, 2, 1]);
+    expect((await clients.list()).map((c) => c.name)).toEqual(['Café Nube', 'Lucía M.', 'Bruno A.']);
+  });
+
+  it('of four saves at once with one key, one stores the quote and the others answer it', async () => {
+    const { call, quotes } = setup();
+    const answers = await Promise.all([1, 2, 3, 4].map(() => call('POST', '/api/quotes', { ...newQuick, submissionKey: key })));
+    expect(answers.map((a) => a.status).sort()).toEqual([200, 200, 200, 201]);
+    expect(new Set(answers.map((a) => (a.body.quote as Quote).id))).toEqual(new Set([3]));
+    expect((await quotes.list()).map((q) => q.id)).toEqual([3, 2, 1]);
+  });
+
+  it('of four saves at once with one key for a new client name, one quote and one client are left', async () => {
+    const { call, quotes, clients } = setup();
+    const { clientId: _id, ...byName } = newQuote;
+    const answers = await Promise.all([1, 2, 3, 4].map(() => call('POST', '/api/quotes', { ...byName, client: 'Bruno A.', submissionKey: key })));
+    expect(answers.map((a) => a.status).sort()).toEqual([200, 200, 200, 201]);
+    const quote = (await quotes.get(3))!;
+    expect((await quotes.list()).map((q) => q.id)).toEqual([3, 2, 1]);
+    expect((await clients.list()).map((c) => [c.id, c.name])).toEqual([[1, 'Café Nube'], [2, 'Lucía M.'], [quote.clientId, 'Bruno A.']]);
+  });
+
+  it('rejects a key that is not 8 to 64 letters, digits or dashes, storing nothing', async () => {
+    const { call, quotes } = setup();
+    for (const submissionKey of ['corta', 'con espacios 123', 'x'.repeat(65), 12345678, 'clave_con_guion_bajo']) {
+      expect(await call('POST', '/api/quotes', { ...newQuick, submissionKey })).toEqual({
+        status: 422,
+        body: { error: 'Revisá los datos del presupuesto.', fields: { submissionKey: 'La clave de envío tiene que tener de 8 a 64 letras, números o guiones.' } },
+      });
+    }
+    expect(await call('POST', '/api/quotes', { ...newQuick, title: '', submissionKey: 'corta' })).toMatchObject({
+      status: 422, body: { fields: { title: 'Completá este dato.', submissionKey: expect.any(String) } },
+    });
+    expect(await quotes.list()).toEqual([rejected, sent]);
+  });
+
+  it('without a key, every save stores a quote, as before', async () => {
+    const { call, quotes } = setup();
+    expect((await call('POST', '/api/quotes', newQuick)).status).toBe(201);
+    expect((await call('POST', '/api/quotes', { ...newQuick, submissionKey: '' })).status).toBe(201);
+    expect((await call('POST', '/api/quotes', { ...newQuick, submissionKey: null })).status).toBe(201);
+    expect((await quotes.list()).map((q) => q.number)).toEqual(['P-0005', 'P-0004', 'P-0003', 'P-0002', 'P-0001']);
+  });
+
+  it('a key used by a print job is free for a quote', async () => {
+    const { call } = setup();
+    expect((await call('POST', '/api/quotes', { ...newQuick, submissionKey: 'abcdefgh' })).status).toBe(201);
+    expect((await call('POST', '/api/quotes', { ...newQuote, submissionKey: 'abcdefgi' })).status).toBe(201);
   });
 });

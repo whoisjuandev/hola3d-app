@@ -20,6 +20,9 @@ export type StoredProject = Omit<Project, 'client'>;
  */
 export type StoredPrintJob = Omit<PrintJob, 'printer' | 'filaments'> & { filaments: { spoolId: number; grams: number }[]; submissionKey?: string | null };
 
+/** A quote as stored: `submissionKey` is the key of the save that stored it, if one was sent; it is not part of the API's quote. */
+export type StoredQuote = Quote & { submissionKey?: string | null };
+
 /** A service task as stored: its printer by id only, the printer's name and minutes read when it is read. */
 export type StoredServiceTask = Omit<ServiceTask, 'printer' | 'printerMinutes'>;
 
@@ -35,7 +38,7 @@ export type StoredServiceLog = Omit<ServiceLog, 'printer' | 'task'>;
 export interface MemoryTables {
   clients: Map<number, Client>;
   orders: Map<string, StoredOrder>;
-  quotes: Map<number, Quote>;
+  quotes: Map<number, StoredQuote>;
   printers: Map<number, Printer>;
   spools: Map<number, Spool>;
   printJobs: Map<number, StoredPrintJob>;

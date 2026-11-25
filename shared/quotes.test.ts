@@ -4,7 +4,7 @@ import { DEFAULT_COST_SETTINGS } from './cost-settings';
 import {
   addDays, canAcceptQuote, isQuoteExpired, canChangeQuoteStatus, defaultValidUntil, formatDay, formatPesos, formatQuoteNumber, missingReferences,
   ordersFromQuote, quoteContact, quoteWhatsappMessage, quoteWhatsappUrl, validateAcceptQuote, validateNewQuote, validateQuoteChanges,
-  validateQuoteClient, QUOTE_STATUSES, calculationSummary, type Quote,
+  validateQuoteClient, QUOTE_STATUSES, calculationSummary, isSameQuoteSave, recipientFieldErrors, type NewQuote, type Quote,
 } from './quotes';
 
 const a1: CalcPrinter = { id: 1, name: 'La A1', purchasePrice: 720000, lifetimeHours: 5000, powerWatts: 100 };
@@ -300,8 +300,10 @@ describe('WhatsApp message', () => {
   it('writes to the client, or to the recipient of a quote without a client', () => {
     expect(quoteContact(quote, { phone: '+54 9 11 5555-0142' })).toEqual({ name: 'Café Nube', phone: '+54 9 11 5555-0142' });
     expect(quoteContact(quickQuote, null)).toEqual({ name: 'Juan Pérez', phone: '+54 9 11 5555-0199' });
-    // Accepted for a client without a phone: the recipient's phone is still the way to reach them.
-    expect(quoteContact({ ...quickQuote, client: 'Juan P.' }, { phone: '' })).toEqual({ name: 'Juan P.', phone: '+54 9 11 5555-0199' });
+    // Accepted for a client without a phone: the recipient fields belong to quotes without a client, so they are never used.
+    expect(quoteContact({ ...quickQuote, client: 'Juan P.' }, { phone: '' })).toEqual({ name: 'Juan P.', phone: '' });
+    expect(quoteContact({ ...quickQuote, client: 'Juan P.' }, null)).toEqual({ name: 'Juan P.', phone: '' });
+    expect(quoteContact({ ...quickQuote, client: 'Juan P.' }, { phone: '11 4444-0000' })).toEqual({ name: 'Juan P.', phone: '11 4444-0000' });
   });
 
   it('opens the client chat with the message, or WhatsApp without a number when the client has no phone', () => {
@@ -346,5 +348,76 @@ describe('calculationSummary', () => {
   it('names a piece without a name by its place', () => {
     const r = calculateCost({ lines: [{ ...input.lines[1], name: '', quantity: 2 }] }, [a1], [white], DEFAULT_COST_SETTINGS);
     expect(calculationSummary(r)).toBe(['Presupuesto Hola3D', `• Pieza 1 × 2: ${formatPesos(r.total)} (${formatPesos(r.unitPrice)} c/u)`, `Total: ${formatPesos(r.total)}`].join('\n'));
+  });
+});
+
+describe('names and titles stored as one line of text', () => {
+  const quickBody = { recipientName: 'Juan Pérez', title: 'Llaveros', input };
+  const message = 'Escribilo en una línea, sin caracteres invisibles.';
+
+  it('rejects a recipient name or title with control characters, like a NUL the table CHECK would refuse', () => {
+    for (const bad of ['\u0000', 'Juan\u0000', 'Ju\nan', 'Juan\tPérez', '\u001b[1m', 'Juan\u007f', 'Juan\u0085']) {
+      expect(validateNewQuote({ ...quickBody, recipientName: bad })).toEqual({ ok: false, errors: { recipientName: message } });
+      expect(validateNewQuote({ ...quickBody, title: bad })).toEqual({ ok: false, errors: { title: message } });
+      expect(validateNewQuote({ ...valid, title: bad })).toEqual({ ok: false, errors: { title: message } });
+    }
+  });
+
+  it('asks for a name that is only spaces, as SQLite trims it, and keeps accents and symbols', () => {
+    for (const blank of [' ', '\u00a0 ', '  \u2003']) {
+      expect(validateNewQuote({ ...quickBody, recipientName: blank })).toEqual({ ok: false, errors: { recipientName: 'Completá este dato.' } });
+    }
+    expect(validateNewQuote({ ...quickBody, recipientName: 'Ñandú & Cía. (Córdoba) 😀' })).toMatchObject({ ok: true, value: { recipientName: 'Ñandú & Cía. (Córdoba) 😀' } });
+  });
+
+  it('checks the same on an edit', () => {
+    const changes = { title: 'Llaveros', validUntil: null, note: '', status: 'enviado', recipientName: 'Juan', recipientPhone: '', showBreakdown: false };
+    expect(validateQuoteChanges({ ...changes, recipientName: '\u0000' }, true)).toEqual({ ok: false, errors: { recipientName: message } });
+    expect(validateQuoteChanges({ ...changes, title: 'Llave\u0000ros' }, true)).toEqual({ ok: false, errors: { title: message } });
+    // The note is free text over several lines.
+    expect(validateQuoteChanges({ ...changes, note: 'Seña.\nRetira el lunes.' }, true)).toMatchObject({ ok: true });
+  });
+});
+
+describe('recipientFieldErrors', () => {
+  const message = 'Este presupuesto tiene cliente: se usan su nombre y su teléfono.';
+
+  it('refuses the recipient fields sent for a quote that has a client, whatever their value', () => {
+    expect(recipientFieldErrors({ recipientName: 'Juan', title: 'x' }, true)).toEqual({ recipientName: message });
+    expect(recipientFieldErrors({ recipientPhone: '' }, true)).toEqual({ recipientPhone: message });
+    expect(recipientFieldErrors({ recipientName: null, recipientPhone: '11 5555-0199' }, true)).toEqual({ recipientName: message, recipientPhone: message });
+  });
+
+  it('lets them through for a quote without a client, and lets any other field through', () => {
+    expect(recipientFieldErrors({ recipientName: 'Juan', recipientPhone: '11 5555-0199' }, false)).toEqual({});
+    expect(recipientFieldErrors({ title: 'x', note: '' }, true)).toEqual({});
+    expect(recipientFieldErrors(undefined, true)).toEqual({});
+  });
+});
+
+describe('isSameQuoteSave', () => {
+  const sentQuick: NewQuote = {
+    client: '', clientId: null, recipientName: 'Juan Pérez', recipientPhone: '+54 9 11 5555-0199', title: 'Llaveros y cartel', validUntil: null, note: '',
+    showBreakdown: false, status: 'enviado', input,
+  };
+  const sentForClient: NewQuote = { ...sentQuick, recipientName: '', recipientPhone: '', clientId: 3 };
+
+  it('is the same save for the same recipient or client and the same calculator input, whatever the other fields', () => {
+    expect(isSameQuoteSave(quickQuote, sentQuick)).toBe(true);
+    expect(isSameQuoteSave(quickQuote, { ...sentQuick, recipientPhone: '', title: 'Otro', note: 'x', validUntil: '2026-12-31', showBreakdown: true })).toBe(true);
+    // Accepted since it was saved: it is still the quote that recipient's save stored.
+    expect(isSameQuoteSave({ ...quickQuote, clientId: 4, client: 'Juan P.' }, sentQuick)).toBe(true);
+    expect(isSameQuoteSave(quote, sentForClient)).toBe(true);
+    expect(isSameQuoteSave(quote, { ...sentForClient, clientId: null, client: ' café nube ' })).toBe(true);
+  });
+
+  it('is another save for another recipient, another client or another input', () => {
+    expect(isSameQuoteSave(quickQuote, { ...sentQuick, recipientName: 'Juan P.' })).toBe(false);
+    expect(isSameQuoteSave(quickQuote, sentForClient)).toBe(false);
+    expect(isSameQuoteSave(quote, sentQuick)).toBe(false);
+    expect(isSameQuoteSave(quote, { ...sentForClient, clientId: 4 })).toBe(false);
+    expect(isSameQuoteSave(quote, { ...sentForClient, clientId: null, client: 'Lucía M.' })).toBe(false);
+    expect(isSameQuoteSave(quickQuote, { ...sentQuick, input: { lines: [input.lines[0]] } })).toBe(false);
+    expect(isSameQuoteSave(quickQuote, { ...sentQuick, input: { ...input, profit: { mode: 'multiplicador', value: 4 } } })).toBe(false);
   });
 });

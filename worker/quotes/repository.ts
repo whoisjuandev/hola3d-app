@@ -1,7 +1,7 @@
 import type { CalcInput, CalcResult } from '../../shared/calculator';
 import { canAcceptQuote, canChangeQuoteStatus, formatQuoteNumber } from '../../shared/quotes';
 import type { NewQuoteStatus, Quote, QuoteChanges, QuoteOrderInput, QuoteStatus } from '../../shared/quotes';
-import type { MemoryTables } from '../memory';
+import type { MemoryTables, StoredQuote } from '../memory';
 import { insertOrderStatement, memoryInsertOrder } from '../orders/repository';
 
 /**
@@ -28,8 +28,15 @@ export interface QuoteRepository {
   /** Saves a new quote with the next number. The input and result are stored as they are, never recalculated. */
   create(draft: QuoteDraft): Promise<Quote>;
   /**
+   * As create, and the quote carries `submissionKey`, only while no quote carries it yet: the check is inside the
+   * insert, so of two saves with one key only one stores a quote. Null for the other, having written nothing.
+   */
+  createWithKey(draft: QuoteDraft, submissionKey: string): Promise<Quote | null>;
+  /** The quote that carries this submission key, or null. */
+  bySubmission(submissionKey: string): Promise<Quote | null>;
+  /**
    * Writes only the fields in `changes`. Null when the quote does not exist or, when a status is sent, its status may
-   * not change to it any more.
+   * not change to it any more, or, when a recipient field is sent, it has a client by now.
    */
   update(id: number, changes: Partial<QuoteChanges>): Promise<Quote | null>;
   /**
@@ -81,6 +88,23 @@ function toQuote(row: QuoteRow): Quote {
 }
 
 const SELECT = 'SELECT quotes.*, clients.name AS client_name FROM quotes LEFT JOIN clients ON clients.id = quotes.client_id';
+const INSERT_COLUMNS = `number, client_id, recipient_name, recipient_phone, title, status, valid_until, show_breakdown, input_json, result_json,
+             total, note, created_at, updated_at`;
+// The number is derived inside the INSERT so two saves cannot read the same max.
+const NEXT_NUMBER = 'COALESCE((SELECT MAX(number) FROM quotes), 0) + 1';
+
+/** The values of INSERT_COLUMNS after the number, in order. */
+function insertValues(draft: QuoteDraft, now: string): unknown[] {
+  return [
+    draft.clientId, draft.recipientName, draft.recipientPhone, draft.title, draft.status, draft.validUntil, draft.showBreakdown ? 1 : 0,
+    JSON.stringify(draft.input), JSON.stringify(draft.result), draft.result.total, draft.note, now, now,
+  ];
+}
+
+/** The unique index on `quotes.submission_key` refused a write: another save with the same key got there first. */
+function isSubmissionKeyTaken(error: unknown): boolean {
+  return error instanceof Error && /UNIQUE constraint failed: quotes\.submission_key/.test(error.message);
+}
 const OPEN = "status IN ('borrador', 'enviado')";
 
 /** The column of each editable field, and how its value is stored. */
@@ -113,23 +137,37 @@ export function d1QuoteRepository(db: D1Database): QuoteRepository {
     get,
 
     async create(draft) {
-      const now = new Date().toISOString();
-      // The number is derived inside the INSERT so two saves cannot read the same max.
       const row = await db
-        .prepare(
-          `INSERT INTO quotes (number, client_id, recipient_name, recipient_phone, title, status, valid_until, show_breakdown, input_json, result_json,
-             total, note, created_at, updated_at)
-           VALUES (COALESCE((SELECT MAX(number) FROM quotes), 0) + 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           RETURNING id`,
-        )
-        .bind(
-          draft.clientId, draft.recipientName, draft.recipientPhone, draft.title, draft.status, draft.validUntil, draft.showBreakdown ? 1 : 0,
-          JSON.stringify(draft.input), JSON.stringify(draft.result), draft.result.total, draft.note, now, now,
-        )
+        .prepare(`INSERT INTO quotes (${INSERT_COLUMNS}) VALUES (${NEXT_NUMBER}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`)
+        .bind(...insertValues(draft, new Date().toISOString()))
         .first<{ id: number }>();
       const quote = row && (await get(row.id));
       if (!quote) throw new Error('Insert returned no row');
       return quote;
+    },
+
+    async createWithKey(draft, submissionKey) {
+      // The guard is in the INSERT: a key some quote carries inserts no row. Should two inserts still meet, the unique
+      // index refuses the second one; either way it writes nothing.
+      const row = await db
+        .prepare(
+          `INSERT INTO quotes (${INSERT_COLUMNS}, submission_key)
+           SELECT ${NEXT_NUMBER}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+           WHERE NOT EXISTS (SELECT 1 FROM quotes WHERE submission_key = ?)
+           RETURNING id`,
+        )
+        .bind(...insertValues(draft, new Date().toISOString()), submissionKey, submissionKey)
+        .first<{ id: number }>()
+        .catch((error: unknown) => {
+          if (isSubmissionKeyTaken(error)) return null;
+          throw error;
+        });
+      return row ? get(row.id) : null;
+    },
+
+    async bySubmission(submissionKey) {
+      const row = await db.prepare(`${SELECT} WHERE quotes.submission_key = ?`).bind(submissionKey).first<QuoteRow>();
+      return row ? toQuote(row) : null;
     },
 
     async update(id, changes) {
@@ -138,7 +176,9 @@ export function d1QuoteRepository(db: D1Database): QuoteRepository {
       const set = sent.map((key) => `${COLUMNS[key][0]} = ?`);
       const values = sent.map((key) => (COLUMNS[key][1] as (v: unknown) => unknown)(changes[key]));
       // When a status is sent, the guard repeats canChangeQuoteStatus in SQL, so an accept that lands first is not undone.
-      const guard = changes.status === undefined ? '' : ` AND (status = ? OR (status != 'aceptado' AND ? != 'aceptado'))`;
+      // When a recipient field is sent, the quote must still have no client: an accept may have given it one since.
+      const recipient = changes.recipientName !== undefined || changes.recipientPhone !== undefined ? ' AND client_id IS NULL' : '';
+      const guard = (changes.status === undefined ? '' : ` AND (status = ? OR (status != 'aceptado' AND ? != 'aceptado'))`) + recipient;
       const row = await db
         .prepare(`UPDATE quotes SET ${[...set, 'updated_at = ?'].join(', ')} WHERE id = ?${guard} RETURNING id`)
         .bind(...values, new Date().toISOString(), id, ...(changes.status === undefined ? [] : [changes.status, changes.status]))
@@ -170,7 +210,22 @@ function sequence(quote: Pick<Quote, 'number'>): number {
 export function memoryQuoteRepository(tables: MemoryTables): QuoteRepository {
   const { quotes, clients } = tables;
   // Copies in and out, like JSON columns: changing a returned quote never changes the stored one.
-  const read = (q: Quote): Quote => ({ ...structuredClone(q), client: q.clientId === null ? null : clients.get(q.clientId)?.name ?? '' });
+  const read = ({ submissionKey: _key, ...q }: StoredQuote): Quote => ({
+    ...structuredClone(q), client: q.clientId === null ? null : clients.get(q.clientId)?.name ?? '',
+  });
+  const create = (draft: QuoteDraft, submissionKey: string | null): Quote => {
+    const id = Math.max(0, ...quotes.keys()) + 1;
+    const number = Math.max(0, ...[...quotes.values()].map(sequence)) + 1;
+    const now = new Date().toISOString();
+    const quote: StoredQuote = {
+      id, number: formatQuoteNumber(number), clientId: draft.clientId, client: null, recipientName: draft.recipientName,
+      recipientPhone: draft.recipientPhone, title: draft.title, status: draft.status, validUntil: draft.validUntil, showBreakdown: draft.showBreakdown,
+      input: structuredClone(draft.input), result: structuredClone(draft.result), total: draft.result.total, note: draft.note, createdAt: now,
+      updatedAt: now, submissionKey,
+    };
+    quotes.set(id, quote);
+    return read(quote);
+  };
 
   return {
     async list(filter = {}) {
@@ -184,23 +239,22 @@ export function memoryQuoteRepository(tables: MemoryTables): QuoteRepository {
       return quote ? read(quote) : null;
     },
     async create(draft) {
-      const id = Math.max(0, ...quotes.keys()) + 1;
-      const number = Math.max(0, ...[...quotes.values()].map(sequence)) + 1;
-      const now = new Date().toISOString();
-      const quote: Quote = {
-        id, number: formatQuoteNumber(number), clientId: draft.clientId, client: null, recipientName: draft.recipientName,
-        recipientPhone: draft.recipientPhone, title: draft.title, status: draft.status, validUntil: draft.validUntil, showBreakdown: draft.showBreakdown,
-        input: structuredClone(draft.input), result: structuredClone(draft.result), total: draft.result.total, note: draft.note, createdAt: now,
-        updatedAt: now,
-      };
-      quotes.set(id, quote);
-      return read(quote);
+      return create(draft, null);
+    },
+    async createWithKey(draft, submissionKey) {
+      // No await in here, so nothing can run between the check and the write.
+      return [...quotes.values()].some((q) => q.submissionKey === submissionKey) ? null : create(draft, submissionKey);
+    },
+    async bySubmission(submissionKey) {
+      const quote = [...quotes.values()].find((q) => q.submissionKey === submissionKey);
+      return quote ? read(quote) : null;
     },
     async update(id, changes) {
       const current = quotes.get(id);
       if (!current || (changes.status !== undefined && !canChangeQuoteStatus(current.status, changes.status))) return null;
+      if ((changes.recipientName !== undefined || changes.recipientPhone !== undefined) && current.clientId !== null) return null;
       const sent = Object.fromEntries(Object.entries(changes).filter(([, value]) => value !== undefined));
-      const updated: Quote = { ...current, ...sent, updatedAt: new Date().toISOString() };
+      const updated: StoredQuote = { ...current, ...sent, updatedAt: new Date().toISOString() };
       quotes.set(id, updated);
       return read(updated);
     },

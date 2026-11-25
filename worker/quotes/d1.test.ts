@@ -1,6 +1,7 @@
 // The quotes table rebuild of migration 0015 and the quote D1 adapter's SQL, run against a real SQLite database.
 import { describe, expect, it } from 'vitest';
 import type { CalcInput, CalcResult } from '../../shared/calculator';
+import { d1ClientRepository } from '../clients/repository';
 import { sqliteD1, migrationSql } from '../print-jobs/sqlite-d1';
 import { d1QuoteRepository, type QuoteDraft } from './repository';
 
@@ -144,5 +145,94 @@ describe('D1 quotes without a client', () => {
     expect(await repo.update(2, { status: 'enviado', title: 'Otro' })).toBeNull();
     expect(rows()).toEqual(before);
     expect(await repo.update(2, { note: 'Pagó la seña.' })).toMatchObject({ status: 'aceptado', note: 'Pagó la seña.' });
+  });
+});
+
+describe('D1 quote submission keys (migration 0016)', () => {
+  const key = 'f3b0c442-98fc-4c1c-a3e6-6f2d5b8e9a01';
+
+  it('adds the key column to every quote as NULL, with a unique index, leaving the rows as they were', async () => {
+    const { sql } = await sqliteD1({ before: '0016' });
+    sql.exec(ROWS_BEFORE_0015);
+    const before = sql.prepare('SELECT * FROM quotes ORDER BY id').all();
+    sql.exec('BEGIN');
+    sql.exec(migrationSql('0016'));
+    sql.exec('COMMIT');
+    expect(sql.prepare('SELECT * FROM quotes ORDER BY id').all()).toEqual(before.map((q) => ({ ...q, submission_key: null })));
+    expect(sql.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'quotes' AND sql IS NOT NULL ORDER BY name").all())
+      .toEqual([{ name: 'quotes_client' }, { name: 'quotes_submission_key' }]);
+  });
+
+  it('the same key twice stores one quote: the second save writes nothing and answers null', async () => {
+    const { repo, rows } = await setup();
+    const saved = await repo.createWithKey(quick, key);
+    expect(saved).toMatchObject({ id: 6, number: 'P-0004', recipientName: 'Juan Pérez' });
+    expect(saved).not.toHaveProperty('submissionKey');
+    const after = rows();
+    expect(await repo.createWithKey({ ...quick, title: 'Otra vez' }, key)).toBeNull();
+    expect(rows()).toEqual(after);
+    expect(await repo.bySubmission(key)).toEqual(saved);
+    expect(await repo.bySubmission('otra-clave-123')).toBeNull();
+  });
+
+  it('the unique index refuses a taken key even when the statement guard is skipped', async () => {
+    const { repo, sql } = await setup();
+    await repo.createWithKey(quick, key);
+    expect(() => sql.exec(`UPDATE quotes SET submission_key = '${key}' WHERE id = 1`)).toThrow(/UNIQUE/);
+  });
+
+  it('saves without a key as before, any number of times, and other keys alongside', async () => {
+    const { repo, sql } = await setup();
+    await repo.create(quick);
+    await repo.create(quick);
+    expect(await repo.createWithKey(quick, 'otra-clave-123')).toMatchObject({ number: 'P-0006' });
+    expect(sql.prepare('SELECT number, submission_key FROM quotes WHERE id > 5 ORDER BY id').all()).toEqual([
+      { number: 4, submission_key: null }, { number: 5, submission_key: null }, { number: 6, submission_key: 'otra-clave-123' },
+    ]);
+  });
+});
+
+describe('D1 removing a client a refused write created', () => {
+  async function withClients() {
+    const { db, sql } = await sqliteD1();
+    sql.exec(ROWS_BEFORE_0015);
+    const clients = d1ClientRepository(db);
+    const quotes = d1QuoteRepository(db);
+    const fresh = async (name: string) => (await clients.create({ name, phone: '', instagram: '', email: '', note: '' })).id;
+    return { db, sql, clients, quotes, fresh };
+  }
+
+  it('removes a client nothing refers to', async () => {
+    const { clients, fresh } = await withClients();
+    const id = await fresh('Alba');
+    expect(await clients.removeIfUnused(id)).toBe(true);
+    expect(await clients.get(id)).toBeNull();
+    expect(await clients.removeIfUnused(id)).toBe(false);
+  });
+
+  it('keeps a client an order, a quote or a project refers to', async () => {
+    const { clients, quotes, sql, fresh } = await withClients();
+    const withOrder = await fresh('Con pedido');
+    sql.exec(`INSERT INTO orders (id, item, client, client_id, channel, stage, price, created_at, updated_at)
+      VALUES ('0009', 'Maceta', 'Con pedido', ${withOrder}, 'WhatsApp', 'nuevo', 1000, '${stamp}', '${stamp}')`);
+    const withQuote = await fresh('Con presupuesto');
+    await quotes.create({ ...quick, clientId: withQuote, recipientName: '', recipientPhone: '' });
+    const withProject = await fresh('Con proyecto');
+    sql.exec(`INSERT INTO projects (name, client_id, created_at, updated_at) VALUES ('Kit', ${withProject}, '${stamp}', '${stamp}')`);
+    for (const id of [withOrder, withQuote, withProject, 1, 2]) {
+      expect(await clients.removeIfUnused(id)).toBe(false);
+      expect(await clients.get(id)).not.toBeNull();
+    }
+  });
+
+  it('a losing accept leaves its new client removable, and the winning accept keeps its own', async () => {
+    const { clients, quotes, fresh } = await withClients();
+    await quotes.create(quick);
+    const [alba, sol] = [await fresh('Alba'), await fresh('Sol')];
+    expect(await quotes.accept(6, alba, [order])).toBe(true);
+    expect(await quotes.accept(6, sol, [order])).toBe(false);
+    expect(await clients.removeIfUnused(sol)).toBe(true);
+    expect(await clients.removeIfUnused(alba)).toBe(false);
+    expect((await clients.list()).map((c) => c.name)).toEqual(['Alba', 'Café Nube', 'Lucía M.']);
   });
 });

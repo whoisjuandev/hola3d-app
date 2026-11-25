@@ -47,12 +47,13 @@ INSERT INTO quotes (id, number, client_id, title, status, valid_until, input_jso
   70000, '', '2026-11-24T11:00:00Z', '2026-11-24T11:00:00Z');
 
 -- A quick quote from the calculator: sent to someone who is not a client yet (name and phone as text), with no
--- validity date and the cost breakdown on its print view. Priced with today's costs and the ×3 multiplier.
-INSERT INTO quotes (id, number, client_id, recipient_name, recipient_phone, title, status, valid_until, show_breakdown, input_json, result_json, total, note, created_at, updated_at) VALUES
+-- validity date and the cost breakdown on its print view. Priced with today's costs and the ×3 multiplier. It carries the
+-- submission key its dialog sent, so a retry of that save answers P-0004 instead of storing it again.
+INSERT INTO quotes (id, number, client_id, recipient_name, recipient_phone, title, status, valid_until, show_breakdown, input_json, result_json, total, note, created_at, updated_at, submission_key) VALUES
 (4, 4, NULL, 'Valentina S.', '+54 9 11 5555-0150', 'Imanes con nombre para el cumple', 'enviado', NULL, 1,
   '{"lines":[{"name":"Imán de heladera con nombre","quantity":20,"printerId":1,"printMinutesPerUnit":18,"filaments":[{"spoolId":4,"material":"","pricePerKg":0,"gramsPerUnit":5},{"spoolId":1,"material":"","pricePerKg":0,"gramsPerUnit":2}],"prepMinutes":20,"postMinutes":60,"packaging":1800}],"profit":{"mode":"multiplicador","value":3}}',
   '{"lines":[{"name":"Imán de heladera con nombre","quantity":20,"printerName":"La A1","printMinutesPerUnit":18,"printMinutes":360,"prepMinutes":20,"postMinutes":60,"filaments":[{"label":"PLA Celeste · Printalot","colorHex":"#8dd3f7","gramsPerUnit":5,"grams":100,"pricePerKg":23500,"cost":2350},{"label":"PLA Blanco · Grilon3","colorHex":"#ffffff","gramsPerUnit":2,"grams":40,"pricePerKg":21000,"cost":840}],"breakdown":{"material":3190,"energy":123,"machineWear":864,"fixedCosts":5000,"labour":9333,"packaging":1800,"failureAllowance":418,"productionCost":20728,"profit":41456,"priceBeforeCommission":62184,"commission":0,"rounding":16,"finalPrice":62200},"total":62200,"unitPrice":3110}],"breakdown":{"material":3190,"energy":123,"machineWear":864,"fixedCosts":5000,"labour":9333,"packaging":1800,"failureAllowance":418,"productionCost":20728,"profit":41456,"priceBeforeCommission":62184,"commission":0,"rounding":16,"finalPrice":62200},"total":62200,"quantity":20,"unitPrice":3110,"settings":{"kwhPrice":215,"labourPerHour":7000,"failurePercent":10,"marginPercent":60,"monthlyFixedCosts":150000,"monthlyPrintHours":180,"packagingCost":900,"roundingStep":100,"commissionPercent":0},"profit":{"mode":"multiplicador","value":3}}',
-  62200, 'Entrega en 5 días hábiles desde la seña.', '2026-11-25T10:00:00Z', '2026-11-25T10:00:00Z');
+  62200, 'Entrega en 5 días hábiles desde la seña.', '2026-11-25T10:00:00Z', '2026-11-25T10:00:00Z', '6f1c2b9e-4d3a-4e8b-9c71-0a5d3e2f8b14');
 
 INSERT INTO orders (id, item, client, client_id, channel, stage, due_date, due_time, price, deposit, paid, material, note, created_at, updated_at) VALUES
 ('0140', 'Figura articulada dragón', 'Tomás G.', 1, 'Instagram', 'entregado', '2026-11-17', NULL, 18000, NULL, 1, 'PLA multicolor (AMS)', 'Pidió reseña. Ofrecer 10% en la próxima compra.', '2026-11-05T12:00:00Z', '2026-11-17T12:00:00Z'),

@@ -11,6 +11,7 @@ import { FormDialog, type FieldSpec } from '../../ui/FormDialog';
 import { ApiError } from '../../ui/api';
 import { changedValues } from '../../ui/forms';
 import { Icon } from '../../ui/Icon';
+import { newSubmissionKey } from '../../ui/submission-key';
 import { BreakdownList } from '../calculator/components';
 import { ClientPicker } from '../clients/ClientPicker';
 import { clientReference, usePickerClients, type ClientReference } from '../clients/picker';
@@ -118,6 +119,8 @@ export function SaveQuoteDialog({ input, total, onClose }: { input: CalcInput; t
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [banner, setBanner] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Sent with every try of this save: after a failed one, trying again answers the quote if it was stored after all.
+  const [submissionKey] = useState(() => newSubmissionKey());
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -125,7 +128,7 @@ export function SaveQuoteDialog({ input, total, onClose }: { input: CalcInput; t
     setBanner(null);
     try {
       const { client, ...rest } = form;
-      const quote = await createQuote({ ...rest, ...clientReference(clients, client), input });
+      const quote = await createQuote({ ...rest, ...clientReference(clients, client), input, submissionKey });
       navigate(`/presupuestos/${quote.id}`);
     } catch (err) {
       const apiErr = err as ApiError;

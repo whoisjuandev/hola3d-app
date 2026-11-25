@@ -1,6 +1,7 @@
 // "Cotización rápida": a short form from the calculator's result for someone who is not a client yet. The first of its
 // three actions saves the quote once, as enviado, with the recipient as text; later actions reuse it, updating it first
-// when the form changed.
+// when the form changed. Every try of the save sends the key made when the dialog opened, so after a failed save (even
+// one whose answer was lost) the next action stores no second quote.
 import { useId, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import type { CalcInput } from '../../../shared/calculator';
@@ -8,10 +9,11 @@ import { quoteContact, quoteWhatsappMessage, quoteWhatsappUrl, type Quote } from
 import { workshopToday } from '../../../shared/service';
 import { ApiError } from '../../ui/api';
 import { Icon } from '../../ui/Icon';
+import { newSubmissionKey } from '../../ui/submission-key';
 import { money } from '../orders/format';
 import { createQuote, updateQuote } from './api';
 import {
-  newQuickQuoteForm, quickQuoteChanges, quickQuoteFields, quickQuoteProblem, VALIDITY_CHOICES, type QuickQuoteForm,
+  newQuickQuoteForm, quickQuoteFields, quickQuoteProblem, saveQuickQuote, VALIDITY_CHOICES, type QuickQuoteForm,
 } from './quick';
 import { useModal } from './useModal';
 
@@ -25,6 +27,7 @@ export function QuickQuoteDialog({ input, total, onClose }: { input: CalcInput; 
   const [today] = useState(() => workshopToday(new Date()));
   const [form, setForm] = useState<QuickQuoteForm>(() => newQuickQuoteForm(input.lines.map((l) => l.name)));
   const [saved, setSaved] = useState<Quote | null>(null);
+  const [submissionKey] = useState(() => newSubmissionKey());
   const [busy, setBusy] = useState(false);
   // The state above changes on the next render; this stops a second click that lands before it.
   const running = useRef(false);
@@ -36,12 +39,9 @@ export function QuickQuoteDialog({ input, total, onClose }: { input: CalcInput; 
 
   const set = <K extends keyof QuickQuoteForm>(key: K, value: QuickQuoteForm[K]) => setForm((f) => ({ ...f, [key]: value }));
 
-  /** The saved quote, saving it the first time and updating what changed in the form since then. */
-  async function save(): Promise<Quote> {
-    const fields = quickQuoteFields(form, today);
-    if (!saved) return createQuote({ ...fields, status: 'enviado', input });
-    const changes = quickQuoteChanges(fields, saved);
-    return Object.keys(changes).length ? updateQuote(saved.id, changes) : saved;
+  /** The saved quote, saving it until a save has answered and updating what changed in the form since then. */
+  function save(): Promise<Quote> {
+    return saveQuickQuote({ saved, fields: quickQuoteFields(form, today), input, submissionKey }, { create: createQuote, update: updateQuote });
   }
 
   async function run(action: Action) {

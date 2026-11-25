@@ -1,4 +1,5 @@
 // The quick quote form of the calculator: what it starts with, what it saves and what changed since it was saved.
+import type { CalcInput } from '../../../shared/calculator';
 import { addDays, type Quote } from '../../../shared/quotes';
 import { defaultQuoteTitle } from './format';
 
@@ -62,4 +63,25 @@ export function quickQuoteChanges(fields: QuickQuoteFields, saved: QuickQuoteFie
     return (typeof value === 'string' ? value.trim() : value) === saved[key];
   };
   return Object.fromEntries(Object.entries(fields).filter(([key]) => !same(key as keyof QuickQuoteFields))) as Partial<QuickQuoteFields>;
+}
+
+/** The API calls a save makes, passed in so the steps can be tested without a server. */
+export interface QuickQuoteApi {
+  create(body: Record<string, unknown>): Promise<Quote>;
+  update(id: number, changes: Record<string, unknown>): Promise<Quote>;
+}
+
+/**
+ * The saved quote, for any of the three actions. Until a save has answered, every action saves it as enviado with the
+ * same `submissionKey`, made when the dialog opened: when an earlier try was stored but its answer was lost, the API
+ * answers that quote instead of storing a second one. Whatever the form changed since the quote was stored is then
+ * written with an update, the same as for a quote saved earlier in the dialog.
+ */
+export async function saveQuickQuote(
+  step: { saved: Quote | null; fields: QuickQuoteFields; input: CalcInput; submissionKey: string }, api: QuickQuoteApi,
+): Promise<Quote> {
+  const { fields, input, submissionKey } = step;
+  const quote = step.saved ?? (await api.create({ ...fields, status: 'enviado', input, submissionKey }));
+  const changes = quickQuoteChanges(fields, quote);
+  return Object.keys(changes).length ? api.update(quote.id, changes) : quote;
 }
