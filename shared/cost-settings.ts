@@ -1,8 +1,14 @@
 // Workshop cost settings, shared by the Worker API and the calculator. One record for the whole shop.
 import { asBody, readInteger, type Body, type Errors } from './fields';
 import type { ValidationResult } from './orders';
+import { DEFAULT_PROFIT_SETTINGS, readProfitSettings, type ProfitSettings } from './profit';
 
-export interface CostSettingsInput {
+/**
+ * The settings record. The profit fields (starting mode, starting multiplier and shortcuts; `marginPercent` is the starting
+ * percentage) were added later: a record saved before them, or built without them, reads as their defaults through
+ * profitSettingsOf. D1 always stores them.
+ */
+export interface CostSettingsInput extends Partial<ProfitSettings> {
   kwhPrice: number; // whole pesos per kWh
   labourPerHour: number; // whole pesos per hour of preparation and post-processing
   failurePercent: number; // 0 to 100, at most two decimals; applied to material, energy and machine wear
@@ -13,6 +19,15 @@ export interface CostSettingsInput {
   roundingStep: number; // whole pesos, at least 1; final prices go up to a multiple of it
   commissionPercent: number; // 0 to under 100, at most two decimals; a sales platform's cut (Mercado Libre)
 }
+
+/** The nine settings a price is worked out with, in the order a quote's result stores them. */
+export const PRICING_KEYS = [
+  'kwhPrice', 'labourPerHour', 'failurePercent', 'marginPercent', 'monthlyFixedCosts', 'monthlyPrintHours', 'packagingCost', 'roundingStep',
+  'commissionPercent',
+] as const satisfies readonly (keyof CostSettingsInput)[];
+
+/** Only the settings a price is worked out with. */
+export type PricingSettings = Pick<CostSettingsInput, (typeof PRICING_KEYS)[number]>;
 
 export interface CostSettings extends CostSettingsInput {
   updatedAt: string | null; // null while the defaults have never been saved
@@ -29,6 +44,7 @@ export const DEFAULT_COST_SETTINGS: CostSettingsInput = {
   packagingCost: 800,
   roundingStep: 100,
   commissionPercent: 0,
+  ...DEFAULT_PROFIT_SETTINGS,
 };
 
 /** A number from `min` with at most two decimals, below `max` (or up to it when `inclusiveMax`). */
@@ -43,7 +59,7 @@ function readPercent(body: Body, errors: Errors, key: string, max: number, inclu
 
 const PERCENT = 'Poné un porcentaje entre 0 y 100, con hasta dos decimales.';
 
-/** Validate the whole settings record. Error messages are shown to the owners as is. */
+/** Validate the whole settings record; the profit fields only when present. Error messages are shown to the owners as is. */
 export function validateCostSettings(input: unknown): ValidationResult<CostSettingsInput> {
   const errors: Errors = {};
   const body = asBody(input);
@@ -57,6 +73,7 @@ export function validateCostSettings(input: unknown): ValidationResult<CostSetti
   const packagingCost = readInteger(body, errors, 'packagingCost', 0, 'Poné el packaging en pesos, sin centavos.');
   const roundingStep = readInteger(body, errors, 'roundingStep', 1, 'El redondeo va en pesos: un número entero desde 1.');
   const commissionPercent = readPercent(body, errors, 'commissionPercent', 100, false, 'La comisión va de 0 a menos de 100 %, con hasta dos decimales.');
+  const profit = readProfitSettings(body, errors);
 
   if (Object.keys(errors).length) return { ok: false, errors };
   return {
@@ -71,6 +88,7 @@ export function validateCostSettings(input: unknown): ValidationResult<CostSetti
       packagingCost: packagingCost as number,
       roundingStep: roundingStep as number,
       commissionPercent: commissionPercent as number,
+      ...profit,
     },
   };
 }

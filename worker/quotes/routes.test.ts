@@ -353,3 +353,58 @@ it('leaves other paths to the caller', async () => {
     expect(await handleQuotes(new Request(url), url, deps)).toBeNull();
   }
 });
+
+describe('profit mode in quotes', () => {
+  it('freezes the profit mode and value sent with the input', async () => {
+    const { call, settings: settingsRepo, quotes } = setup();
+    const byMultiplier = { ...input, profit: { mode: 'multiplicador' as const, value: 4 } };
+    const { status, body } = await call('POST', '/api/quotes', { ...newQuote, input: byMultiplier });
+    expect(status).toBe(201);
+    const expected = calculateCost(byMultiplier, [a1], [white], costs);
+    expect(expected.total).not.toBe(26200);
+    expect(body.quote).toMatchObject({ input: byMultiplier, result: { ...expected, profit: { mode: 'multiplicador', value: 4 } }, total: expected.total });
+
+    await settingsRepo.save({ ...settings, profitMode: 'porcentaje', marginPercent: 10 });
+    expect((await quotes.get(3))?.result).toEqual(expected);
+  });
+
+  it('without a choice prices with the starting mode of the settings, and records it', async () => {
+    const { call, settings: settingsRepo } = setup();
+    await settingsRepo.save({ ...settings, profitMode: 'multiplicador', profitMultiplier: 2.5 });
+    const { body } = await call('POST', '/api/quotes', newQuote);
+    const quote = body.quote as Quote;
+    expect(quote.result.profit).toEqual({ mode: 'multiplicador', value: 2.5 });
+    expect(quote.result.settings).toEqual(costs);
+    expect(quote.total).toBe(calculateCost({ ...input, profit: { mode: 'multiplicador', value: 2.5 } }, [a1], [white], costs).total);
+  });
+
+  it('rejects a wrong profit choice, storing nothing', async () => {
+    const { call, quotes } = setup();
+    expect(await call('POST', '/api/quotes', { ...newQuote, input: { ...input, profit: { mode: 'multiplicador', value: 0.5 } } })).toEqual({
+      status: 422, body: { error: 'Revisá los datos del presupuesto.', fields: { input: 'El multiplicador va de 1 a 11, con hasta dos decimales.' } },
+    });
+    expect(await quotes.list()).toEqual([rejected, sent]);
+  });
+
+  it('serves a quote saved before the profit mode existed as stored, and it accepts as before', async () => {
+    // As result_json was written before migration 0014: no profit field.
+    const { profit: _profit, ...oldResult } = priced;
+    const old = stored({ id: 4, number: 'P-0004', result: oldResult as typeof priced });
+    const tables = memoryTables([cafe, lucia], [existingOrder], [old]);
+    const deps = {
+      quotes: memoryQuoteRepository(tables), orders: memoryOrderRepository(tables), clients: memoryClientRepository(tables),
+      printers: memoryPrinterRepository([a1]), spools: memorySpoolRepository([white]), settings: memoryCostSettingsRepository(settings),
+    };
+    const run = async (method: string, path: string) => {
+      const url = new URL(`https://app.test${path}`);
+      const res = await handleQuotes(new Request(url, { method, body: method === 'POST' ? '{}' : undefined }), url, deps);
+      return { status: res!.status, body: (await res!.json()) as Record<string, unknown> };
+    };
+    const got = await run('GET', '/api/quotes/4');
+    expect(got).toEqual({ status: 200, body: { quote: old, client: cafe, orders: [] } });
+    expect('profit' in (got.body.quote as Quote).result).toBe(false);
+    const accepted = await run('POST', '/api/quotes/4/accept');
+    expect(accepted.status).toBe(201);
+    expect((accepted.body.orders as Order[]).map((o) => o.price)).toEqual([21200, 5000]);
+  });
+});

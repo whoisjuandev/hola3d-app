@@ -2,8 +2,9 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import type { CalcInput, CalcLineResult } from '../../../shared/calculator';
-import type { CostSettingsInput } from '../../../shared/cost-settings';
+import type { PricingSettings } from '../../../shared/cost-settings';
 import { CHANNELS, type Channel } from '../../../shared/orders';
+import type { ProfitChoice } from '../../../shared/profit';
 import type { Quote, QuoteStatus } from '../../../shared/quotes';
 import { QUOTE_STATUS_LABEL, defaultValidUntil, formatDay, isQuoteExpired, ordersFromQuote } from '../../../shared/quotes';
 import { FormDialog, type FieldSpec } from '../../ui/FormDialog';
@@ -56,8 +57,8 @@ export function QuoteRow({ quote, today, showClient }: { quote: Quote; today: st
   );
 }
 
-/** A frozen line as it was priced: printer, times, filaments, its total and, folded, its own breakdown. */
-export function FrozenLine({ line, settings }: { line: CalcLineResult; settings: CostSettingsInput }) {
+/** A frozen line as it was priced: printer, times, filaments, its total and, folded, its own breakdown with the profit it used. */
+export function FrozenLine({ line, settings, profit }: { line: CalcLineResult; settings: PricingSettings; profit: ProfitChoice }) {
   const id = useId();
   return (
     <article className="card quote-line" aria-labelledby={id}>
@@ -88,7 +89,7 @@ export function FrozenLine({ line, settings }: { line: CalcLineResult; settings:
       )}
       <details className="quote-line__details">
         <summary>Desglose de esta pieza</summary>
-        <BreakdownList breakdown={line.breakdown} settings={settings} />
+        <BreakdownList breakdown={line.breakdown} settings={settings} profit={profit} />
       </details>
     </article>
   );

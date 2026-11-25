@@ -1,5 +1,5 @@
 // A modal form for creating or editing one record. Field errors come from the API's `fields`.
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError } from './api';
 import { Icon } from './Icon';
 import './form-dialog.css';
@@ -16,13 +16,15 @@ export interface FieldSpec {
   hint?: string;
 }
 
-export function FormDialog({ title, fields, initial, submitLabel, onSubmit, onClose }: {
+export function FormDialog({ title, fields, initial, submitLabel, onSubmit, onClose, extra }: {
   title: string;
   fields: FieldSpec[];
   initial: Record<string, string>;
   submitLabel: string;
   onSubmit: (values: Record<string, string>) => Promise<void>;
   onClose: () => void;
+  /** More controls after the fields, whose state the caller keeps; they get the API's field errors. */
+  extra?: (errors: Record<string, string>) => ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [values, setValues] = useState(initial);
@@ -112,6 +114,7 @@ export function FormDialog({ title, fields, initial, submitLabel, onSubmit, onCl
             </div>
           ))}
         </div>
+        {extra?.(errors)}
         <div className="form-dialog__actions">
           <button type="button" className="btn btn--ghost" onClick={onClose}>Cancelar</button>
           <button type="submit" className="btn" disabled={saving}>{saving ? 'Guardando…' : submitLabel}</button>

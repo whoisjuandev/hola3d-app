@@ -1,8 +1,9 @@
--- Sample clients, projects, quotes, orders, printers, spools, print jobs (logged and planned), service tasks and logs, calendar events and cost
--- settings for local development only (npm run db:seed). Never run against production. Contact details are made up.
+-- Sample clients, projects, quotes, orders, printers, spools, print jobs (logged and planned), service tasks and logs, calendar events,
+-- calculator profiles and cost settings for local development only (npm run db:seed). Never run against production. Contact details are made up.
 -- As of 2026-11-25 the home screen has something in every block: order 0145 is due today, 0141, 0142 and 0143 are late,
 -- Lavanda and Dorado silk are low, three service tasks are due, P-0002 waits for an answer, and 0140 was delivered this
 -- month with its real cost.
+DELETE FROM calc_profiles;
 DELETE FROM calendar_events;
 DELETE FROM service_logs;
 DELETE FROM service_tasks;
@@ -157,6 +158,21 @@ INSERT INTO calendar_events (id, type, title, event_date, event_time, note, done
 (6, 'recordatorio', 'Cobrar la seña del Kit robótica', '2026-12-01', NULL, '', 0, '2026-11-23T12:00:00Z', '2026-11-23T12:00:00Z'),
 (7, 'reunion', 'Martín R.: el nombre del soporte', '2026-12-03', '19:00', 'Por videollamada.', 0, '2026-11-23T12:00:00Z', '2026-11-23T12:00:00Z');
 
--- The single cost settings row (the migration creates it with defaults; these are the sample shop's numbers).
-INSERT OR REPLACE INTO cost_settings (id, kwh_price, labour_per_hour, failure_percent, margin_percent, monthly_fixed_costs, monthly_print_hours, packaging_cost, rounding_step, commission_percent, updated_at) VALUES
-(1, 215, 7000, 10, 60, 150000, 180, 900, 100, 0, '2026-11-20T12:00:00Z');
+-- Saved calculator profiles. "Llaveros por mayor" prices by multiplier; "Topper dorado" still names spool 9, which the shop
+-- no longer has, so loading it shows the notice and leaves that filament to choose again.
+INSERT INTO calc_profiles (id, name, input_json, created_at, updated_at) VALUES
+(1, 'Llaveros por mayor',
+  '{"lines":[{"name":"Llavero con logo","quantity":50,"printerId":1,"printMinutesPerUnit":26,"filaments":[{"spoolId":1,"material":"","pricePerKg":0,"gramsPerUnit":6},{"spoolId":2,"material":"","pricePerKg":0,"gramsPerUnit":3}],"prepMinutes":30,"postMinutes":150,"packaging":4000}],"profit":{"mode":"multiplicador","value":3}}',
+  '2026-11-18T12:00:00Z', '2026-11-18T12:00:00Z'),
+(2, 'Organizador de escritorio',
+  '{"lines":[{"name":"Organizador de escritorio","quantity":1,"printerId":1,"printMinutesPerUnit":270,"filaments":[{"spoolId":3,"material":"","pricePerKg":0,"gramsPerUnit":140}],"prepMinutes":15,"postMinutes":30,"packaging":900}],"profit":{"mode":"porcentaje","value":60}}',
+  '2026-11-19T12:00:00Z', '2026-11-19T12:00:00Z'),
+(3, 'Topper dorado',
+  '{"lines":[{"name":"Topper de torta","quantity":1,"printerId":1,"printMinutesPerUnit":95,"filaments":[{"spoolId":9,"material":"","pricePerKg":0,"gramsPerUnit":35}],"prepMinutes":10,"postMinutes":20,"packaging":700}]}',
+  '2026-11-20T12:00:00Z', '2026-11-20T12:00:00Z');
+
+-- The single cost settings row (the migration creates it with defaults; these are the sample shop's numbers). New
+-- calculations start in percentage (60 %); the multiplier mode starts at ×3 and offers the three shortcuts.
+INSERT OR REPLACE INTO cost_settings (id, kwh_price, labour_per_hour, failure_percent, margin_percent, monthly_fixed_costs, monthly_print_hours, packaging_cost, rounding_step, commission_percent, profit_mode, profit_multiplier, profit_shortcuts_json, updated_at) VALUES
+(1, 215, 7000, 10, 60, 150000, 180, 900, 100, 0, 'porcentaje', 3,
+  '[{"name":"Mayorista","multiplier":3},{"name":"Minorista","multiplier":4},{"name":"Llaveros","multiplier":5}]', '2026-11-20T12:00:00Z');

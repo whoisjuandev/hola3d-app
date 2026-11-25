@@ -3,6 +3,7 @@ import type { CalcInput, CalcLineInput, CalcPrinter, CalcResult, CalcSpool, Fila
 import { whatsappUrl } from './clients';
 import { asBody, isMissing, readText, type Body, type Errors } from './fields';
 import { CHANNELS, type Channel, type NewOrder, type ValidationResult } from './orders';
+import { readProfitChoice } from './profit';
 
 export const QUOTE_STATUSES = ['borrador', 'enviado', 'aceptado', 'rechazado'] as const;
 export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
@@ -160,9 +161,13 @@ function readLine(raw: unknown, index: number): CalcLineInput | string {
   };
 }
 
-/** The calculator input with only its known fields, or the message of its first problem. */
-function readCalcInput(raw: unknown): CalcInput | string {
-  const lines = asBody(raw).lines;
+/**
+ * The calculator input with only its known fields, or the message of its first problem. The profit choice is optional:
+ * without it the price starts from the settings. Quotes and saved calculator profiles read their input with it.
+ */
+export function readCalcInput(raw: unknown): CalcInput | string {
+  const body = asBody(raw);
+  const lines = body.lines;
   if (!Array.isArray(lines) || lines.length === 0) return 'Agregá al menos una pieza.';
   if (lines.length > MAX_LINES) return `Máximo ${MAX_LINES} piezas por presupuesto.`;
   const out: CalcLineInput[] = [];
@@ -171,7 +176,9 @@ function readCalcInput(raw: unknown): CalcInput | string {
     if (typeof line === 'string') return line;
     out.push(line);
   }
-  return { lines: out };
+  if (body.profit == null) return { lines: out };
+  const profit = readProfitChoice(body.profit);
+  return typeof profit === 'string' ? profit : { lines: out, profit };
 }
 
 /**
@@ -283,4 +290,16 @@ export function quoteWhatsappMessage(quote: MessageQuote): string {
 /** WhatsApp with the message ready: the client's chat when there is a phone, otherwise the contact picker. */
 export function quoteWhatsappUrl(quote: MessageQuote, phone: string): string {
   return `${whatsappUrl(phone) ?? 'https://wa.me/'}?text=${encodeURIComponent(quoteWhatsappMessage(quote))}`;
+}
+
+/**
+ * The calculation as plain text for a client: each piece with its quantity and price, then the total. Nothing about
+ * costs, profit or commission. What "Copiar resumen" copies.
+ */
+export function calculationSummary(result: Pick<CalcResult, 'lines' | 'total'>): string {
+  const items = result.lines.map((line, i) => {
+    const each = line.quantity > 1 ? ` (${formatPesos(line.unitPrice)} c/u)` : '';
+    return `• ${line.name || `Pieza ${i + 1}`} × ${line.quantity}: ${formatPesos(line.total)}${each}`;
+  });
+  return ['Presupuesto Hola3D', ...items, `Total: ${formatPesos(result.total)}`].join('\n');
 }

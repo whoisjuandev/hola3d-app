@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { calculateCost, spoolShortages } from '../../../shared/calculator';
+import { calculateCost, spoolShortages, type CalcInput } from '../../../shared/calculator';
 import type { CostSettings } from '../../../shared/cost-settings';
 import type { Printer } from '../../../shared/printers';
+import { profitSettingsOf } from '../../../shared/profit';
+import { calculationSummary } from '../../../shared/quotes';
 import type { Spool } from '../../../shared/spools';
 import { Icon } from '../../ui/Icon';
 import { useCollection } from '../../ui/useCollection';
@@ -11,8 +13,11 @@ import { fetchPrinters } from '../printers/api';
 import { SaveQuoteDialog } from '../quotes/components';
 import { fetchSpools } from '../spools/api';
 import { fetchCostSettings, updateCostSettings } from './api';
-import { LineEditor, SettingsDialog, Summary } from './components';
-import { newLine, newUse, toCalcInput, type LineDraft } from './draft';
+import { CopySummary, LineEditor, ProfitPicker, SettingsDialog, Summary } from './components';
+import {
+  fromCalcInput, hasData, missingNotice, newLine, newProfitDraft, newUse, profitDraftFrom, toCalcInput, toProfitChoice, type LineDraft,
+} from './draft';
+import { ProfilesBar } from './ProfilesBar';
 import '../orders/orders.css';
 import '../quotes/quotes.css';
 import './calculator.css';
@@ -88,19 +93,30 @@ function Calculator({ printers, spools, settings }: { printers: Printer[]; spool
   const defaultPrinter = (printers.find((p) => p.status === 'activa') ?? printers[0])?.id ?? null;
   const defaultSpool = (spools.find((s) => s.remainingGrams > 0) ?? spools[0])?.id ?? null;
   const [lines, setLines] = useState<LineDraft[]>(() => [newLine(1, { printerId: defaultPrinter, spoolId: defaultSpool, packaging: settings.packagingCost })]);
+  const [profit, setProfit] = useState(() => newProfitDraft(settings));
   const [saving, setSaving] = useState(false);
 
-  const input = useMemo(() => toCalcInput(lines), [lines]);
+  const choice = useMemo(() => toProfitChoice(profit, settings), [profit, settings]);
+  const input = useMemo(() => ({ ...toCalcInput(lines), profit: choice }), [lines, choice]);
   const result = useMemo(() => calculateCost(input, printers, spools, settings), [input, printers, spools, settings]);
   const shortages = useMemo(() => spoolShortages(input, spools), [input, spools]);
 
   const key = () => nextKey.current++;
   const update = (i: number, next: LineDraft) => setLines((ls) => ls.map((l, j) => (j === i ? next : l)));
 
+  /** Put a saved profile's input in the calculator; answers the notice of a printer or spool that no longer exists. */
+  const loadInput = (saved: CalcInput) => {
+    const loaded = fromCalcInput(saved, printers, spools, key);
+    setLines(loaded.lines.length ? loaded.lines : [newLine(key(), { printerId: defaultPrinter, spoolId: defaultSpool, packaging: settings.packagingCost })]);
+    setProfit(profitDraftFrom(saved.profit, settings));
+    return loaded.missing.length ? missingNotice(loaded.missing) : null;
+  };
+
   return (
     <>
       <div className="calc__body">
         <div className="calc__lines">
+          <ProfilesBar input={input} dirty={hasData(lines)} onLoad={loadInput} />
           {lines.map((line, i) => (
             <LineEditor
               key={line.key}
@@ -123,12 +139,14 @@ function Calculator({ printers, spools, settings }: { printers: Printer[]; spool
           >
             <Icon name="plus" />Agregar otra pieza
           </button>
+          <ProfitPicker draft={profit} choice={choice} shortcuts={profitSettingsOf(settings).profitShortcuts} onChange={setProfit} />
         </div>
 
         <aside className="calc__aside">
           <Summary result={result} settings={settings} />
           <button type="button" className="btn btn--block" onClick={() => setSaving(true)}><Icon name="quote" />Guardar como presupuesto</button>
           <p className="muted calc__note">Queda guardado para un cliente con el precio de hoy, listo para imprimir o mandar por WhatsApp.</p>
+          <CopySummary text={calculationSummary(result)} />
         </aside>
       </div>
 

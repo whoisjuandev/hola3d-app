@@ -77,3 +77,27 @@ describe('validateCostSettings', () => {
     expect(validateCostSettings({ ...valid, updatedAt: 'x', extra: 1 })).toEqual({ ok: true, value: valid });
   });
 });
+
+describe('validateCostSettings profit fields', () => {
+  it('starts with the default profit settings', () => {
+    expect(DEFAULT_COST_SETTINGS).toMatchObject({
+      profitMode: 'porcentaje', profitMultiplier: 3,
+      profitShortcuts: [{ name: 'Mayorista', multiplier: 3 }, { name: 'Minorista', multiplier: 4 }, { name: 'Llaveros', multiplier: 5 }],
+    });
+  });
+
+  it('accepts the starting mode, multiplier and shortcuts, and checks them when present', () => {
+    const profit = { profitMode: 'multiplicador', profitMultiplier: 2.5, profitShortcuts: [{ name: ' Mayorista ', multiplier: 3 }] };
+    expect(validateCostSettings({ ...valid, ...profit })).toEqual({
+      ok: true, value: { ...valid, profitMode: 'multiplicador', profitMultiplier: 2.5, profitShortcuts: [{ name: 'Mayorista', multiplier: 3 }] },
+    });
+    expect(validateCostSettings({ ...valid, profitMode: 'doble', profitMultiplier: 0, profitShortcuts: [] })).toEqual({
+      ok: false,
+      errors: {
+        profitMode: 'Elegí con qué empieza la ganancia: porcentaje o multiplicador.',
+        profitMultiplier: 'El multiplicador va de 1 a 11, con hasta dos decimales.',
+        profitShortcuts: 'Poné entre 1 y 8 atajos.',
+      },
+    });
+  });
+});

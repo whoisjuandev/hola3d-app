@@ -11,6 +11,8 @@ import { d1PrintJobRepository } from './print-jobs/repository';
 import { handlePrintJobs } from './print-jobs/routes';
 import { handlePrinters } from './printers/routes';
 import { d1PrinterRepository } from './printers/repository';
+import { d1CalcProfileRepository } from './profiles/repository';
+import { handleCalcProfiles } from './profiles/routes';
 import { d1ProjectRepository } from './projects/repository';
 import { handleProjects } from './projects/routes';
 import { d1QuoteRepository } from './quotes/repository';
@@ -62,6 +64,7 @@ const HANDLERS: Handler[] = [
   }),
   (request, url, env) => handleSpools(request, url, d1SpoolRepository(env.DB)),
   (request, url, env) => handleCostSettings(request, url, d1CostSettingsRepository(env.DB)),
+  (request, url, env) => handleCalcProfiles(request, url, d1CalcProfileRepository(env.DB)),
   (request, url, env) => handleQuotes(request, url, {
     quotes: d1QuoteRepository(env.DB),
     orders: d1OrderRepository(env.DB),

@@ -29,6 +29,10 @@ describe('API dispatch', () => {
     expect(await get('/api/settings/costs')).toEqual({ status: 200, body: { settings: { ...DEFAULT_COST_SETTINGS, updatedAt: null } } });
   });
 
+  it('sends calculator profile paths to the profiles module', async () => {
+    expect(await get('/api/calculator/profiles')).toEqual({ status: 200, body: { profiles: [] } });
+  });
+
   it('sends quote paths to the quotes module', async () => {
     expect(await get('/api/quotes')).toEqual({ status: 200, body: { quotes: [] } });
     expect(await get('/api/quotes/1')).toEqual({ status: 404, body: { error: 'No existe el presupuesto 1.' } });

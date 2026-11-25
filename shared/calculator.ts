@@ -1,6 +1,7 @@
 // The cost calculator: what a set of pieces really costs and what to charge for it. Pure, no storage.
-import type { CostSettingsInput } from './cost-settings';
+import { PRICING_KEYS, type CostSettingsInput, type PricingSettings } from './cost-settings';
 import type { Printer } from './printers';
+import { profitPercent, startingProfit, type ProfitChoice } from './profit';
 import type { Spool } from './spools';
 
 export type CalcPrinter = Pick<Printer, 'id' | 'name' | 'purchasePrice' | 'lifetimeHours' | 'powerWatts'>;
@@ -27,6 +28,8 @@ export interface CalcLineInput {
 
 export interface CalcInput {
   lines: CalcLineInput[];
+  /** How the profit is set. Without it the calculation starts from the settings' starting mode and value. */
+  profit?: ProfitChoice;
 }
 
 /** Every term in whole pesos, in the order of the formula. */
@@ -96,7 +99,9 @@ export interface CalcResult {
   total: number; // the sum of the line totals
   quantity: number; // units over all lines
   unitPrice: number; // total ÷ quantity, whole pesos
-  settings: CostSettingsInput; // the settings the prices came from
+  settings: PricingSettings; // the settings the prices came from
+  /** The profit mode and value the prices used. Absent in results saved before it was recorded: read them with resultProfit. */
+  profit?: ProfitChoice;
 }
 
 /** "PLA Blanco · Grilon3", or "PLA Blanco" without a brand. */
@@ -136,7 +141,8 @@ function perUnit(total: number, quantity: number): number {
   return quantity > 0 ? Math.round(total / quantity) : 0;
 }
 
-function priceLine(line: CalcLineInput, printers: CalcPrinter[], spools: CalcSpool[], s: CostSettingsInput): CalcLineResult {
+/** `marginPercent` is the profit of this calculation as a percentage of the production cost (see profitPercent). */
+function priceLine(line: CalcLineInput, printers: CalcPrinter[], spools: CalcSpool[], s: PricingSettings): CalcLineResult {
   const printer = line.printerId == null ? undefined : printers.find((p) => p.id === line.printerId);
   const printMinutes = line.printMinutesPerUnit * line.quantity;
   const hours = printMinutes / 60;
@@ -197,17 +203,21 @@ function emptyBreakdown(): CostBreakdown {
 }
 
 /**
- * Price every line with the formula of S5 and add the lines up. Each line is rounded up to the rounding step
+ * Price every line with the formula of S5 and add the lines up. The profit is the input's choice, or the settings'
+ * starting mode and value without one. Each line is rounded up to the rounding step
  * on its own, so the total is the sum of what each line charges. A printer or spool that is not in the lists
  * counts as missing: no energy or wear without a printer; a missing spool falls back to the typed price per kg.
  */
 export function calculateCost(input: CalcInput, printers: CalcPrinter[], spools: CalcSpool[], settings: CostSettingsInput): CalcResult {
-  const lines = input.lines.map((line) => priceLine(line, printers, spools, settings));
+  const pricing = Object.fromEntries(PRICING_KEYS.map((key) => [key, settings[key]])) as unknown as PricingSettings;
+  const profit = input.profit ?? startingProfit(settings);
+  // Both modes price through the same percentage, so a multiplier of 1.6 and a margin of 60 % give the same price.
+  const lines = input.lines.map((line) => priceLine(line, printers, spools, { ...pricing, marginPercent: profitPercent(profit) }));
   const breakdown = emptyBreakdown();
   for (const line of lines) for (const t of BREAKDOWN_TERMS) breakdown[t.key] += line.breakdown[t.key];
   const total = breakdown.finalPrice;
   const quantity = lines.reduce((sum, l) => sum + l.quantity, 0);
-  return { lines, breakdown, total, quantity, unitPrice: perUnit(total, quantity), settings: { ...settings } };
+  return { lines, breakdown, total, quantity, unitPrice: perUnit(total, quantity), settings: pricing, profit: { ...profit } };
 }
 
 export interface SpoolShortage {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import type { Channel } from '../../../shared/orders';
+import { resultProfit } from '../../../shared/profit';
 import { canAcceptQuote, formatDay, quoteWhatsappUrl, type QuoteStatus } from '../../../shared/quotes';
 import { Icon } from '../../ui/Icon';
 import { Summary } from '../calculator/components';
@@ -125,7 +126,7 @@ export function QuotePage() {
       <div className="quote-page__body">
         <section className="quote-page__lines" aria-labelledby="piezas">
           <h2 id="piezas" className="client-page__section">Piezas</h2>
-          {quote.result.lines.map((line, i) => <FrozenLine key={i} line={line} settings={quote.result.settings} />)}
+          {quote.result.lines.map((line, i) => <FrozenLine key={i} line={line} settings={quote.result.settings} profit={resultProfit(quote.result)} />)}
         </section>
         <aside className="calc__aside">
           <Summary result={quote.result} settings={quote.result.settings} />

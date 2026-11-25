@@ -1,4 +1,5 @@
 import type { CostSettings, CostSettingsInput } from '../../shared/cost-settings';
+import { profitSettingsOf, type ProfitMode, type ProfitShortcut } from '../../shared/profit';
 
 /** Port: what the cost settings routes need from storage. There is one record, or none yet. */
 export interface CostSettingsRepository {
@@ -16,6 +17,9 @@ interface CostSettingsRow {
   packaging_cost: number;
   rounding_step: number;
   commission_percent: number;
+  profit_mode: ProfitMode;
+  profit_multiplier: number;
+  profit_shortcuts_json: string;
   updated_at: string | null;
 }
 
@@ -30,6 +34,9 @@ function toSettings(row: CostSettingsRow): CostSettings {
     packagingCost: row.packaging_cost,
     roundingStep: row.rounding_step,
     commissionPercent: row.commission_percent,
+    profitMode: row.profit_mode,
+    profitMultiplier: row.profit_multiplier,
+    profitShortcuts: JSON.parse(row.profit_shortcuts_json) as ProfitShortcut[],
     updatedAt: row.updated_at,
   };
 }
@@ -43,22 +50,29 @@ export function d1CostSettingsRepository(db: D1Database): CostSettingsRepository
     },
 
     async save(input) {
+      // The routes always save a whole record (the stored one merged with the request); profit fields missing from
+      // it are written as the defaults they read as.
+      const profit = profitSettingsOf(input);
       const row = await db
         .prepare(
           `INSERT INTO cost_settings (id, kwh_price, labour_per_hour, failure_percent, margin_percent, monthly_fixed_costs,
-             monthly_print_hours, packaging_cost, rounding_step, commission_percent, updated_at)
-           VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             monthly_print_hours, packaging_cost, rounding_step, commission_percent, profit_mode, profit_multiplier,
+             profit_shortcuts_json, updated_at)
+           VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (id) DO UPDATE SET
              kwh_price = excluded.kwh_price, labour_per_hour = excluded.labour_per_hour,
              failure_percent = excluded.failure_percent, margin_percent = excluded.margin_percent,
              monthly_fixed_costs = excluded.monthly_fixed_costs, monthly_print_hours = excluded.monthly_print_hours,
              packaging_cost = excluded.packaging_cost, rounding_step = excluded.rounding_step,
-             commission_percent = excluded.commission_percent, updated_at = excluded.updated_at
+             commission_percent = excluded.commission_percent, profit_mode = excluded.profit_mode,
+             profit_multiplier = excluded.profit_multiplier, profit_shortcuts_json = excluded.profit_shortcuts_json,
+             updated_at = excluded.updated_at
            RETURNING *`,
         )
         .bind(
           input.kwhPrice, input.labourPerHour, input.failurePercent, input.marginPercent, input.monthlyFixedCosts,
-          input.monthlyPrintHours, input.packagingCost, input.roundingStep, input.commissionPercent, new Date().toISOString(),
+          input.monthlyPrintHours, input.packagingCost, input.roundingStep, input.commissionPercent,
+          profit.profitMode, profit.profitMultiplier, JSON.stringify(profit.profitShortcuts), new Date().toISOString(),
         )
         .first<CostSettingsRow>();
       if (!row) throw new Error('Upsert returned no row');

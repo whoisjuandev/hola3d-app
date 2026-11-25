@@ -4,7 +4,7 @@ import { DEFAULT_COST_SETTINGS } from './cost-settings';
 import {
   addDays, canAcceptQuote, isQuoteExpired, canChangeQuoteStatus, defaultValidUntil, formatDay, formatPesos, formatQuoteNumber, missingReferences,
   ordersFromQuote, quoteWhatsappMessage, quoteWhatsappUrl, validateAcceptQuote, validateNewQuote, validateQuoteChanges,
-  QUOTE_STATUSES, type Quote,
+  QUOTE_STATUSES, calculationSummary, type Quote,
 } from './quotes';
 
 const a1: CalcPrinter = { id: 1, name: 'La A1', purchasePrice: 720000, lifetimeHours: 5000, powerWatts: 100 };
@@ -194,5 +194,43 @@ describe('WhatsApp message', () => {
     const text = encodeURIComponent(quoteWhatsappMessage(quote));
     expect(quoteWhatsappUrl(quote, '+54 9 11 5555-0142')).toBe(`https://wa.me/5491155550142?text=${text}`);
     expect(quoteWhatsappUrl(quote, '')).toBe(`https://wa.me/?text=${text}`);
+  });
+});
+
+describe('validateNewQuote profit choice', () => {
+  it('keeps a profit choice with only its known fields, and leaves it out when not sent', () => {
+    const r = validateNewQuote({ ...valid, input: { ...input, profit: { mode: 'multiplicador', value: 4, extra: 1 } } });
+    expect(r).toMatchObject({ ok: true, value: { input: { lines: input.lines, profit: { mode: 'multiplicador', value: 4 } } } });
+    if (r.ok) expect(r.value.input.profit).toEqual({ mode: 'multiplicador', value: 4 });
+    const plain = validateNewQuote(valid);
+    expect(plain.ok && 'profit' in plain.value.input).toBe(false);
+    expect(validateNewQuote({ ...valid, input: { ...input, profit: null } })).toMatchObject({ ok: true });
+  });
+
+  it('rejects a wrong profit choice on input', () => {
+    expect(validateNewQuote({ ...valid, input: { ...input, profit: { mode: 'multiplicador', value: 12 } } })).toEqual({
+      ok: false, errors: { input: 'El multiplicador va de 1 a 11, con hasta dos decimales.' },
+    });
+    expect(validateNewQuote({ ...valid, input: { ...input, profit: { mode: 'doble', value: 2 } } })).toEqual({
+      ok: false, errors: { input: 'Elegí cómo calcular la ganancia: porcentaje o multiplicador.' },
+    });
+  });
+});
+
+describe('calculationSummary', () => {
+  it('lists each piece with its quantity and price, then the total, and nothing about costs or margin', () => {
+    const text = calculationSummary(result);
+    expect(text).toBe([
+      'Presupuesto Hola3D',
+      '• Llavero con logo × 12: $21.200 ($1.767 c/u)',
+      '• Cartel × 1: $5.000',
+      'Total: $26.200',
+    ].join('\n'));
+    expect(text).not.toMatch(/costo|margen|ganancia|material|comisi|%/i);
+  });
+
+  it('names a piece without a name by its place', () => {
+    const r = calculateCost({ lines: [{ ...input.lines[1], name: '', quantity: 2 }] }, [a1], [white], DEFAULT_COST_SETTINGS);
+    expect(calculationSummary(r)).toBe(['Presupuesto Hola3D', `• Pieza 1 × 2: ${formatPesos(r.total)} (${formatPesos(r.unitPrice)} c/u)`, `Total: ${formatPesos(r.total)}`].join('\n'));
   });
 });

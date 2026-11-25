@@ -97,3 +97,51 @@ it('leaves other paths to the caller', async () => {
   expect(await call('GET', '/api/settings/costs/1').run()).toBeNull();
   expect(await call('GET', '/api/printers').run()).toBeNull();
 });
+
+describe('profit settings through /api/settings/costs', () => {
+  const withProfit: CostSettings = {
+    ...stored, profitMode: 'porcentaje', profitMultiplier: 3,
+    profitShortcuts: [{ name: 'Mayorista', multiplier: 3 }, { name: 'Minorista', multiplier: 4 }, { name: 'Llaveros', multiplier: 5 }],
+  };
+
+  it('returns the starting mode, multiplier and shortcuts', async () => {
+    const { run } = call('GET', '/api/settings/costs', undefined, withProfit);
+    expect(await read(await run())).toEqual({ status: 200, body: { settings: withProfit } });
+  });
+
+  it('changes the starting mode, multiplier and shortcuts sent, keeping the rest', async () => {
+    const shortcuts = [{ name: 'Mayorista', multiplier: 2.5 }, { name: 'Ferias', multiplier: 3.5 }];
+    const { run, repo } = call('PUT', '/api/settings/costs', { profitMode: 'multiplicador', profitShortcuts: shortcuts }, withProfit);
+    const { status, body } = await read(await run());
+    expect(status).toBe(200);
+    expect(body.settings).toEqual({ ...withProfit, profitMode: 'multiplicador', profitShortcuts: shortcuts, updatedAt: expect.any(String) });
+    expect(await repo.get()).toEqual(body.settings);
+  });
+
+  it('rejects wrong profit settings, changing nothing', async () => {
+    const { run, repo } = call('PUT', '/api/settings/costs', {
+      profitMode: 'doble', profitMultiplier: 11.5, profitShortcuts: [{ name: 'Mayorista', multiplier: 3 }, { name: 'MAYORISTA', multiplier: 4 }],
+    }, withProfit);
+    expect(await read(await run())).toEqual({
+      status: 422,
+      body: {
+        error: 'Revisá los costos del taller.',
+        fields: {
+          profitMode: 'Elegí con qué empieza la ganancia: porcentaje o multiplicador.',
+          profitMultiplier: 'El multiplicador va de 1 a 11, con hasta dos decimales.',
+          profitShortcuts: 'Atajo 2: ya hay otro atajo con ese nombre.',
+        },
+      },
+    });
+    expect(await repo.get()).toEqual(withProfit);
+  });
+
+  it('rejects 9 shortcuts, changing nothing', async () => {
+    const nine = Array.from({ length: 9 }, (_, i) => ({ name: `Atajo ${i + 1}`, multiplier: 2 }));
+    const { run, repo } = call('PUT', '/api/settings/costs', { profitShortcuts: nine }, withProfit);
+    expect(await read(await run())).toEqual({
+      status: 422, body: { error: 'Revisá los costos del taller.', fields: { profitShortcuts: 'Poné entre 1 y 8 atajos.' } },
+    });
+    expect(await repo.get()).toEqual(withProfit);
+  });
+});

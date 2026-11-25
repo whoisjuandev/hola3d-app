@@ -223,3 +223,44 @@ describe('spoolShortages', () => {
     expect(spoolShortages({ lines: [line({ quantity: 3, filaments: [{ spoolId: 2, material: '', pricePerKg: 0, gramsPerUnit: 10 }] })] }, [yellow])).toEqual([]);
   });
 });
+
+describe('calculateCost profit choice', () => {
+  // Production cost 10000 (labour), no commission, rounding to $1.
+  const base = line({ prepMinutes: 60 });
+  const priced = (profit?: { mode: 'porcentaje' | 'multiplicador'; value: number }, settings: Partial<CostSettingsInput> = {}) =>
+    calculateCost({ lines: [base], ...(profit ? { profit } : {}) }, [a1], [], { ...zero, labourPerHour: 10000, marginPercent: 50, ...settings });
+
+  it('a multiplier m gives profit = production cost × (m − 1)', () => {
+    expect(priced({ mode: 'multiplicador', value: 4 }).breakdown).toMatchObject({ productionCost: 10000, profit: 30000, priceBeforeCommission: 40000 });
+    expect(priced({ mode: 'multiplicador', value: 1 }).breakdown).toMatchObject({ profit: 0, priceBeforeCommission: 10000 });
+  });
+
+  it('a multiplier of 1.6 and a margin of 60 % give the same price, also with commission and rounding', () => {
+    const settings = { commissionPercent: 13, roundingStep: 100 };
+    for (const cost of [9999, 10001, 12345, 777]) {
+      const l = line({ packaging: cost });
+      const run = (profit: { mode: 'porcentaje' | 'multiplicador'; value: number }) =>
+        calculateCost({ lines: [l, base], profit }, [a1], [], { ...zero, labourPerHour: 10000, ...settings });
+      expect(run({ mode: 'multiplicador', value: 1.6 }).breakdown).toEqual(run({ mode: 'porcentaje', value: 60 }).breakdown);
+      expect(run({ mode: 'multiplicador', value: 1.15 }).breakdown).toEqual(run({ mode: 'porcentaje', value: 15 }).breakdown);
+    }
+  });
+
+  it('a percentage in the input overrides the margin of the settings', () => {
+    expect(priced({ mode: 'porcentaje', value: 35 }).breakdown.profit).toBe(3500);
+  });
+
+  it('without a choice it starts from the settings: the margin in percentage mode, the starting multiplier otherwise', () => {
+    expect(priced().breakdown.profit).toBe(5000);
+    expect(priced(undefined, { profitMode: 'multiplicador', profitMultiplier: 2.5 }).breakdown.profit).toBe(15000);
+    expect(priced(undefined, { profitMode: 'porcentaje', profitMultiplier: 2.5 }).breakdown.profit).toBe(5000);
+  });
+
+  it('records the mode and value it used, and keeps only the pricing settings', () => {
+    expect(priced({ mode: 'multiplicador', value: 4 }).profit).toEqual({ mode: 'multiplicador', value: 4 });
+    expect(priced().profit).toEqual({ mode: 'porcentaje', value: 50 });
+    const r = priced(undefined, { profitMode: 'multiplicador', profitMultiplier: 2.5, profitShortcuts: [{ name: 'Mayorista', multiplier: 3 }] });
+    expect(r.profit).toEqual({ mode: 'multiplicador', value: 2.5 });
+    expect(r.settings).toEqual({ ...zero, labourPerHour: 10000, marginPercent: 50 });
+  });
+});
