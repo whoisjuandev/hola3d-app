@@ -34,6 +34,8 @@
     position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between;
     padding: calc(10px + env(safe-area-inset-top)) 16px 10px; border-bottom: 3px solid var(--ink);
   }
+  .topbar__links { display: flex; gap: 8px; }
+  .topbar__links .icon-btn.active { background: var(--ink); color: var(--white); }
   .shell__main { flex: 1; padding: 18px 16px calc(var(--tabbar-h) + 32px); }
   .tabbar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;

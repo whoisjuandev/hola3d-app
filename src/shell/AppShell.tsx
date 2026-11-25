@@ -2,7 +2,8 @@ import { NavLink, Link, Outlet } from 'react-router';
 import { Icon, type IconName } from '../ui/Icon';
 import './shell.css';
 
-interface Section { to: string; label: string; short: string; icon: IconName; inTabs: boolean }
+/** Sections outside the phone tab bar show as icon links in the phone top bar. `long` is that link's label. */
+interface Section { to: string; label: string; short: string; icon: IconName; inTabs: boolean; long?: string }
 
 const SECTIONS: Section[] = [
   { to: '/', label: 'Inicio', short: 'Inicio', icon: 'home', inTabs: true },
@@ -10,7 +11,9 @@ const SECTIONS: Section[] = [
   { to: '/proyectos', label: 'Proyectos', short: 'Proyectos', icon: 'folder', inTabs: true },
   { to: '/agenda', label: 'Calendario', short: 'Agenda', icon: 'calendar', inTabs: true },
   { to: '/taller', label: 'Servicio técnico', short: 'Taller', icon: 'wrench', inTabs: true },
-  { to: '/calculadora', label: 'Calculadora', short: 'Calcular', icon: 'calculator', inTabs: false },
+  { to: '/impresoras', label: 'Impresoras', short: 'Impresoras', icon: 'printer', inTabs: false },
+  { to: '/filamento', label: 'Filamento', short: 'Filamento', icon: 'spool', inTabs: false },
+  { to: '/calculadora', label: 'Calculadora', short: 'Calcular', icon: 'calculator', inTabs: false, long: 'Calculadora de costos' },
 ];
 
 function Brand({ compact }: { compact?: boolean }) {
@@ -42,7 +45,11 @@ export function AppShell() {
 
       <header className="topbar sky">
         <Brand compact />
-        <Link to="/calculadora" className="icon-btn" aria-label="Calculadora de costos"><Icon name="calculator" /></Link>
+        <nav aria-label="Más secciones" className="topbar__links">
+          {SECTIONS.filter((s) => !s.inTabs).map((s) => (
+            <NavLink key={s.to} to={s.to} className="icon-btn" aria-label={s.long ?? s.label}><Icon name={s.icon} /></NavLink>
+          ))}
+        </nav>
       </header>
 
       <main className="shell__main" id="contenido">

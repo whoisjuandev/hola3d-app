@@ -1,5 +1,7 @@
--- Sample orders for local development only (npm run db:seed). Never run against production.
+-- Sample orders, printers and spools for local development only (npm run db:seed). Never run against production.
 DELETE FROM orders;
+DELETE FROM printers;
+DELETE FROM spools;
 INSERT INTO orders (id, item, client, channel, stage, due_date, due_time, price, deposit, paid, material, note, created_at, updated_at) VALUES
 ('0140', 'Figura articulada dragón', 'Tomás G.', 'Instagram', 'entregado', '2026-11-17', NULL, 18000, NULL, 1, 'PLA multicolor (AMS)', 'Pidió reseña. Ofrecer 10% en la próxima compra.', '2026-11-05T12:00:00Z', '2026-11-17T12:00:00Z'),
 ('0141', 'Organizador de escritorio', 'Florencia D.', 'WhatsApp', 'listo', '2026-11-21', NULL, 22000, 11000, 0, 'PLA lavanda', 'Envío por moto. Cobrar el saldo al entregar.', '2026-11-08T12:00:00Z', '2026-11-19T12:00:00Z'),
@@ -8,3 +10,18 @@ INSERT INTO orders (id, item, client, channel, stage, due_date, due_time, price,
 ('0144', 'Piezas de robótica × 30', 'Escuela N.º 12', 'Email', 'disenando', '2026-11-27', NULL, 96000, 48000, 0, 'PETG blanco', 'Parte del proyecto Kit robótica. Ajustar tolerancias de los ejes a 0,2 mm.', '2026-11-12T12:00:00Z', '2026-11-18T12:00:00Z'),
 ('0145', 'Soporte de auriculares', 'Martín R.', 'Instagram', 'nuevo', '2026-11-25', NULL, 14500, NULL, 0, 'PLA negro mate', 'Quiere el nombre grabado en la base. Mandó foto del escritorio para elegir el tono.', '2026-11-18T12:00:00Z', '2026-11-18T12:00:00Z'),
 ('0146', 'Topper de torta “Feliz 30”', 'Sofía P.', 'WhatsApp', 'nuevo', '2026-11-28', NULL, 9000, 4500, 0, 'PLA dorado silk', 'Retira en persona. Confirmar tipografía antes del martes.', '2026-11-19T12:00:00Z', '2026-11-19T12:00:00Z');
+
+INSERT INTO printers (id, name, model, purchase_price, lifetime_hours, power_watts, print_minutes, status, note, created_at, updated_at) VALUES
+(1, 'La A1', 'Bambu Lab A1 + AMS lite', 720000, 5000, 95, 74100, 'activa', 'La que más usamos. AMS para multicolor.', '2026-03-02T12:00:00Z', '2026-11-20T09:00:00Z'),
+(2, 'La Ender', 'Creality Ender 3 V3 SE', 320000, 3000, 110, 108450, 'en_servicio', 'Cambiando la boquilla, vuelve el lunes.', '2025-06-15T12:00:00Z', '2026-11-18T12:00:00Z'),
+(3, 'La vieja', 'Anet A8', 150000, 2000, 120, 121800, 'fuera_de_uso', 'Guardada para repuestos.', '2023-04-01T12:00:00Z', '2026-01-10T12:00:00Z');
+
+INSERT INTO spools (id, material, color_name, color_hex, brand, net_grams, remaining_grams, price, low_stock_grams, note, created_at, updated_at) VALUES
+(1, 'PLA', 'Blanco', '#ffffff', 'Grilon3', 1000, 640, 21000, 150, '', '2026-10-28T12:00:00Z', '2026-11-20T09:00:00Z'),
+(2, 'PLA', 'Amarillo', '#ffc42e', 'Grilon3', 1000, 310, 21000, 150, 'Para los llaveros de Café Nube.', '2026-10-28T12:00:00Z', '2026-11-20T09:00:00Z'),
+(3, 'PLA', 'Lavanda', '#b9a6e8', 'Printalot', 1000, 120, 23500, 150, 'Pedir otra antes de fin de mes.', '2026-09-14T12:00:00Z', '2026-11-19T12:00:00Z'),
+(4, 'PLA', 'Celeste', '#8dd3f7', 'Printalot', 1000, 455, 23500, 150, '', '2026-10-02T12:00:00Z', '2026-11-19T18:00:00Z'),
+(5, 'PLA', 'Negro mate', '#2b2b2b', 'Grilon3', 1000, 1000, 22500, 150, 'Sin abrir.', '2026-11-15T12:00:00Z', '2026-11-15T12:00:00Z'),
+(6, 'PLA', 'Dorado silk', '#d4a72c', 'Printalot', 500, 90, 16000, 100, 'Alcanza para un topper, no para dos.', '2026-08-30T12:00:00Z', '2026-11-12T12:00:00Z'),
+(7, 'PETG', 'Blanco', '#f4f4f4', 'Grilon3', 1000, 870, 24000, 200, 'Para las piezas de robótica.', '2026-11-12T12:00:00Z', '2026-11-18T12:00:00Z'),
+(8, 'TPU', 'Negro', '#1a1a1a', 'Grilon3', 500, 380, 19000, 100, 'Flexible. Imprimir lento.', '2026-07-21T12:00:00Z', '2026-10-05T12:00:00Z');

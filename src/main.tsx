@@ -5,6 +5,8 @@ import '@fontsource/gochi-hand/400.css';
 import './index.css';
 import { AppShell } from './shell/AppShell';
 import { OrdersPage } from './features/orders/OrdersPage';
+import { PrintersPage } from './features/printers/PrintersPage';
+import { SpoolsPage } from './features/spools/SpoolsPage';
 import { ComingSoon } from './screens/ComingSoon';
 
 const router = createBrowserRouter([
@@ -17,6 +19,8 @@ const router = createBrowserRouter([
       { path: 'proyectos', element: <ComingSoon title="Proyectos" /> },
       { path: 'agenda', element: <ComingSoon title="Agenda" /> },
       { path: 'taller', element: <ComingSoon title="Servicio técnico" /> },
+      { path: 'impresoras', element: <PrintersPage /> },
+      { path: 'filamento', element: <SpoolsPage /> },
       { path: 'calculadora', element: <ComingSoon title="Calculadora de costos" /> },
       { path: '*', element: <ComingSoon title="Esta página no existe" /> },
     ],

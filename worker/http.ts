@@ -20,3 +20,8 @@ export async function readJson(request: Request): Promise<unknown> {
     return undefined;
   }
 }
+
+/** True for a JSON object body (not an array, string, number or null). */
+export function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
