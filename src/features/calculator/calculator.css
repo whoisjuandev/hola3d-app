@@ -1,0 +1,95 @@
+.calc { display: flex; flex-direction: column; gap: 20px; }
+.calc__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.calc__body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: 22px; align-items: start; }
+.calc__lines { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.calc__add { align-self: flex-start; }
+.calc__aside { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 10px; }
+.calc__note { padding: 0 4px; }
+
+/* ---- A line (one piece) ---- */
+.calc-line { display: flex; flex-direction: column; gap: 16px; padding: 20px; }
+.calc-line__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.calc-line__title { font-size: 22px; line-height: 26px; font-weight: 900; overflow-wrap: anywhere; }
+.calc-line__grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.4fr); gap: 14px; }
+.calc-line__grid--three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.calc-line__time { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 160px)); gap: 6px 14px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.calc-line__time legend { grid-column: 1 / -1; padding: 0; margin-bottom: 6px; }
+.calc-line__time .field__label { font-size: 12px; color: var(--soft); }
+.calc-line__uses { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 16px; background: var(--mist); border: 1px solid var(--rule); }
+.calc-line__add { align-self: flex-start; }
+.calc-line__foot {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding-top: 14px; border-top: 2px dashed var(--rule);
+  font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.calc-line__foot b { font-size: 22px; font-weight: 900; }
+
+/* A whole-number input with its unit inside, on the right. */
+.calc-input { position: relative; display: block; }
+.calc-input .field__control { width: 100%; padding-right: 44px; font-variant-numeric: tabular-nums; }
+.calc-input__suffix { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 14px; font-weight: 800; color: var(--faint); pointer-events: none; }
+
+/* ---- Filament uses ---- */
+.calc-uses { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.calc-use { display: flex; flex-direction: column; gap: 8px; }
+.calc-use__main { display: grid; grid-template-columns: 28px minmax(0, 1fr) 150px 40px; gap: 10px; align-items: end; }
+.calc-use__swatch { width: 28px; height: 28px; margin-bottom: 10px; border-radius: 999px; border: 3px solid var(--ink); }
+.calc-use__spool select { width: 100%; }
+.calc-use__remove { margin-bottom: 4px; }
+.calc-use__typed { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 10px; padding-left: 38px; padding-right: 50px; }
+.calc-use__warning {
+  display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 12px;
+  background: var(--yellow-soft); border: 2px solid var(--yellow); font-size: 14px; line-height: 19px; font-weight: 700;
+}
+.calc-use__warning .icon { color: var(--red); margin-top: 1px; }
+
+/* ---- Price summary ---- */
+.calc-summary { display: flex; flex-direction: column; gap: 14px; padding: 24px 22px 22px; }
+.calc-summary__title { font-size: 26px; line-height: 30px; font-weight: 900; }
+.calc-breakdown { display: flex; flex-direction: column; }
+.calc-breakdown__row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 5px 0; font-size: 15px; }
+.calc-breakdown__row dt { font-weight: 700; }
+.calc-breakdown__row dd { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.calc-breakdown__row--total { margin: 4px 0; padding: 8px 0; border-top: 2px solid var(--ink); }
+.calc-breakdown__row--total dt, .calc-breakdown__row--total dd { font-weight: 900; }
+.calc-breakdown__note { font-size: 13px; font-weight: 700; color: var(--soft); }
+.calc-summary__total {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 14px 16px;
+  border-radius: 14px; background: var(--ink); color: var(--white); font-weight: 900;
+}
+.calc-summary__total b { font-size: 32px; line-height: 1; font-variant-numeric: tabular-nums; }
+.calc-summary__unit { font-weight: 800; color: var(--soft); font-variant-numeric: tabular-nums; }
+.calc-summary__lines { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 12px 0 0; list-style: none; border-top: 2px dashed var(--rule); }
+.calc-summary__lines li { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.calc-summary__lines li > span:last-child { white-space: nowrap; }
+
+/* The phone's total bar, above the tabs. */
+.calc__bar { display: none; }
+
+@media (max-width: 1100px) {
+  .calc__body { grid-template-columns: 1fr; }
+  .calc__aside { position: static; }
+}
+
+@media (max-width: 760px) {
+  .calc { gap: 16px; padding-bottom: 64px; }
+  .calc-line { padding: 16px; gap: 14px; }
+  .calc-line__grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+  .calc-line__name, .calc-line__printer { grid-column: 1 / -1; }
+  .calc-line__time { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 12px; }
+  .calc-line__grid--three { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .calc-line__grid--three > :last-child { grid-column: 1 / -1; }
+  .calc-line__uses { padding: 12px; }
+  .calc-use__main { grid-template-columns: 28px minmax(0, 1fr) 40px; }
+  .calc-use__spool { grid-column: 2 / 4; }
+  .calc-use__grams { grid-column: 1 / 3; }
+  .calc-use__remove { grid-column: 3; }
+  .calc-use__typed { grid-template-columns: minmax(0, 1fr); padding: 0; }
+  .calc__bar {
+    position: fixed; left: 12px; right: 12px; bottom: calc(var(--tabbar-h) + 10px + env(safe-area-inset-bottom)); z-index: 15;
+    display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 18px;
+    border-radius: 999px; background: var(--ink); color: var(--white); text-decoration: none; font-weight: 800;
+    box-shadow: 0 14px 24px -14px rgba(13, 23, 64, 0.7);
+  }
+  .calc__bar b { font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; }
+  .calc__bar-more { margin-left: auto; color: var(--yellow); font-size: 14px; }
+}

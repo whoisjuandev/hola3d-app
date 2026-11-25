@@ -16,6 +16,8 @@ const PATHS = {
   search: <><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>,
   close: <path d="M6 6l12 12M18 6L6 18" />,
   back: <path d="M15 6l-6 6 6 6" />,
+  sliders: <><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></>,
+  alert: <><path d="M12 3l10 18H2z" /><path d="M12 10v5M12 18h.01" /></>,
 } as const;
 
 export type IconName = keyof typeof PATHS;

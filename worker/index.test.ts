@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_COST_SETTINGS } from '../shared/cost-settings';
 import worker from './index';
 
 /** A D1 stand-in whose tables are all empty. Enough to see which module answered. */
@@ -25,6 +26,7 @@ describe('API dispatch', () => {
     expect(await get('/api/printers')).toEqual({ status: 200, body: { printers: [] } });
     expect(await get('/api/spools')).toEqual({ status: 200, body: { spools: [] } });
     expect(await get('/api/clients')).toEqual({ status: 200, body: { clients: [] } });
+    expect(await get('/api/settings/costs')).toEqual({ status: 200, body: { settings: { ...DEFAULT_COST_SETTINGS, updatedAt: null } } });
   });
 
   it('answers 404 when no module owns the path', async () => {

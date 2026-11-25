@@ -85,6 +85,8 @@ export function AppShell() {
             </NavLink>
           ))}
         </nav>
+        {/* The cloud takes the space left under the list, so it never sits behind a link. */}
+        <div className="sidebar__cloud" aria-hidden="true" />
       </aside>
 
       <header className="topbar sky">

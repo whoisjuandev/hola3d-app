@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { changedValues, parseWhole } from './forms';
+import { changedValues, parseDecimal, parseWhole } from './forms';
 
 describe('parseWhole', () => {
   it('reads whole numbers written the way the shop writes them', () => {
@@ -11,6 +11,21 @@ describe('parseWhole', () => {
   it('gives back empty as null and anything else as typed, so the API can explain it', () => {
     expect(parseWhole('  ')).toBeNull();
     expect(parseWhole('12,5')).toBe('12,5');
+  });
+});
+
+describe('parseDecimal', () => {
+  it('reads a decimal comma or point, a percent sign and thousands dots', () => {
+    expect(parseDecimal('14,5')).toBe(14.5);
+    expect(parseDecimal('14.5 %')).toBe(14.5);
+    expect(parseDecimal('10')).toBe(10);
+    expect(parseDecimal('1.000,25')).toBe(1000.25);
+    expect(parseDecimal('-2')).toBe(-2);
+  });
+
+  it('gives back empty as null and anything else as typed, so the API can explain it', () => {
+    expect(parseDecimal(' ')).toBeNull();
+    expect(parseDecimal('diez')).toBe('diez');
   });
 });
 

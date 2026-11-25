@@ -1,4 +1,4 @@
--- Sample clients, orders, printers and spools for local development only (npm run db:seed). Never run against production.
+-- Sample clients, orders, printers, spools and cost settings for local development only (npm run db:seed). Never run against production.
 -- Contact details are made up.
 DELETE FROM orders;
 DELETE FROM clients;
@@ -37,3 +37,7 @@ INSERT INTO spools (id, material, color_name, color_hex, brand, net_grams, remai
 (6, 'PLA', 'Dorado silk', '#d4a72c', 'Printalot', 500, 90, 16000, 100, 'Alcanza para un topper, no para dos.', '2026-08-30T12:00:00Z', '2026-11-12T12:00:00Z'),
 (7, 'PETG', 'Blanco', '#f4f4f4', 'Grilon3', 1000, 870, 24000, 200, 'Para las piezas de robótica.', '2026-11-12T12:00:00Z', '2026-11-18T12:00:00Z'),
 (8, 'TPU', 'Negro', '#1a1a1a', 'Grilon3', 500, 380, 19000, 100, 'Flexible. Imprimir lento.', '2026-07-21T12:00:00Z', '2026-10-05T12:00:00Z');
+
+-- The single cost settings row (the migration creates it with defaults; these are the sample shop's numbers).
+INSERT OR REPLACE INTO cost_settings (id, kwh_price, labour_per_hour, failure_percent, margin_percent, monthly_fixed_costs, monthly_print_hours, packaging_cost, rounding_step, commission_percent, updated_at) VALUES
+(1, 215, 7000, 10, 60, 150000, 180, 900, 100, 0, '2026-11-20T12:00:00Z');

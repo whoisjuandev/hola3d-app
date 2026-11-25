@@ -4,6 +4,7 @@ import { createBrowserRouter, RouterProvider } from 'react-router';
 import '@fontsource/gochi-hand/400.css';
 import './index.css';
 import { AppShell } from './shell/AppShell';
+import { CalculatorPage } from './features/calculator/CalculatorPage';
 import { ClientPage } from './features/clients/ClientPage';
 import { ClientsPage } from './features/clients/ClientsPage';
 import { OrdersPage } from './features/orders/OrdersPage';
@@ -25,7 +26,7 @@ const router = createBrowserRouter([
       { path: 'taller', element: <ComingSoon title="Servicio técnico" /> },
       { path: 'impresoras', element: <PrintersPage /> },
       { path: 'filamento', element: <SpoolsPage /> },
-      { path: 'calculadora', element: <ComingSoon title="Calculadora de costos" /> },
+      { path: 'calculadora', element: <CalculatorPage /> },
       { path: '*', element: <ComingSoon title="Esta página no existe" /> },
     ],
   },
