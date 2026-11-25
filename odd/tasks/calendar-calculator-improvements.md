@@ -32,7 +32,7 @@ Not chosen, so not built: photos per day, voice notes per day, resin and laser c
 
 | ID | Task | Specs | Route | Commit |
 |---|---|---|---|---|
-| T1 | Calendar events and day panel | S1, S2 | worker | |
+| T1 | Calendar events and day panel | S1, S2 | worker | 82c7240 (done) |
 | T2 | Profit by multiplier, saved profiles and copy summary | S3, S4 | worker | |
 | T3 | Load a 3D model in the calculator | S5 | worker | |
 | T4 | Quick quote saved without a client | S6 | worker | |
@@ -44,3 +44,4 @@ T2, T3 and T4 all change the calculator screen, so they run one after another.
 - **L1** (2026-11-25, user, verbatim): "esta bien, pero hay cosas por hacer... te paso capturas de las cosas que me gustaria mejorar [Image#1] [Image#2] [Image#3]". The three images are screens of the Área Maker platform: "Agenda" (month grid, a panel for the selected day with events, photos and voice notes), "Calculadora de Costos" (FDM, resin and laser tabs, model upload, profiles, profit by multiplier or percentage, sales commission, "Copiar resumen" and "Cotización rápida"), and the "Cotización rápida" dialog (recipient, product, quantity, validity buttons, notes, "Incluir desglose de costos", phone, total, "Descargar PDF", "WhatsApp", "Copiar").
 - **L2** (2026-11-25, decision): asked what to take from each screen, the owner chose. Calendar: "Eventos a mano por tipo", "Panel del día al costado". Calculator: "Ganancia por multiplicador", "Perfiles guardados y copiar resumen", "Cargar un modelo 3D". Quick quote: "Rápida, pero queda guardada". Not chosen: "Fotos por día", "Notas de voz por día", "Resina y láser".
 - **L3** (2026-11-25, decision by the parent): details the owner did not set. A multiplier of m equals a margin of (m − 1) × 100 %, so the 1 to 11 range matches the existing 0 to 1000 % limit. A sliced 3MF is read for its real numbers because it is the accurate case of "3MF". The quick quote keeps the "Incluir desglose de costos" switch of the reference form, which changes the earlier rule that the print view never shows costs: it shows them only when that switch was on.
+- **L4** (2026-11-25, evidence): T1 done in 82c7240. 590 tests pass, typecheck and lint clean. Differential check of `GET /api/calendar` (week and month) against the base commit: identical apart from the new `events` field. Worker checked create, done, edit and delete from the day panel against the local D1 at 1440 px and 390 px; the parent re-ran the suite and checked the month view with the panel in a browser. Beyond the spec: ten colour tokens for the five event types, and a fix to the shared `FormDialog` heading id, which collided with any field named `title` (it also affected the quote form).
