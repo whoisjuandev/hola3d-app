@@ -1,3 +1,4 @@
+import { workshopToday } from '../shared/service';
 import { handleClients } from './clients/routes';
 import { d1ClientRepository } from './clients/repository';
 import { problem } from './http';
@@ -9,10 +10,15 @@ import { handlePrinters } from './printers/routes';
 import { d1PrinterRepository } from './printers/repository';
 import { d1QuoteRepository } from './quotes/repository';
 import { handleQuotes } from './quotes/routes';
+import { d1ServiceRepository } from './service/repository';
+import { handleService } from './service/routes';
 import { handleCostSettings } from './settings/routes';
 import { d1CostSettingsRepository } from './settings/repository';
 import { handleSpools } from './spools/routes';
 import { d1SpoolRepository } from './spools/repository';
+
+/** The workshop's date when the request is handled. */
+const today = () => workshopToday(new Date());
 
 type Handler = (request: Request, url: URL, env: Env) => Promise<Response | null>;
 
@@ -27,7 +33,8 @@ const HANDLERS: Handler[] = [
     settings: d1CostSettingsRepository(env.DB),
   }),
   (request, url, env) => handleClients(request, url, d1ClientRepository(env.DB), d1OrderRepository(env.DB)),
-  (request, url, env) => handlePrinters(request, url, d1PrinterRepository(env.DB)),
+  (request, url, env) => handlePrinters(request, url, d1PrinterRepository(env.DB), { service: d1ServiceRepository(env.DB), today }),
+  (request, url, env) => handleService(request, url, { service: d1ServiceRepository(env.DB), printers: d1PrinterRepository(env.DB), today }),
   (request, url, env) => handleSpools(request, url, d1SpoolRepository(env.DB)),
   (request, url, env) => handleCostSettings(request, url, d1CostSettingsRepository(env.DB)),
   (request, url, env) => handleQuotes(request, url, {

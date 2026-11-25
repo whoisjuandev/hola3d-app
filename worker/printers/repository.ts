@@ -10,7 +10,7 @@ export interface PrinterRepository {
   update(id: number, changes: Partial<PrinterInput>): Promise<Printer | null>;
 }
 
-interface PrinterRow {
+export interface PrinterRow {
   id: number;
   name: string;
   model: string;
@@ -24,7 +24,7 @@ interface PrinterRow {
   updated_at: string;
 }
 
-function toPrinter(row: PrinterRow): Printer {
+export function toPrinter(row: PrinterRow): Printer {
   return {
     id: row.id,
     name: row.name,
@@ -45,6 +45,17 @@ const COLUMNS: Record<keyof PrinterInput, string> = {
   printMinutes: 'print_minutes', status: 'status', note: 'note',
 };
 
+/** The statement that inserts a printer and returns its row. Other modules batch it with their own writes. */
+export function insertPrinterStatement(db: D1Database, input: PrinterInput, now: string): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO printers (name, model, purchase_price, lifetime_hours, power_watts, print_minutes, status, note, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING *`,
+    )
+    .bind(input.name, input.model, input.purchasePrice, input.lifetimeHours, input.powerWatts, input.printMinutes, input.status, input.note, now, now);
+}
+
 /** Adapter: D1 storage. Printers sort by name. */
 export function d1PrinterRepository(db: D1Database): PrinterRepository {
   return {
@@ -59,15 +70,7 @@ export function d1PrinterRepository(db: D1Database): PrinterRepository {
     },
 
     async create(input) {
-      const now = new Date().toISOString();
-      const row = await db
-        .prepare(
-          `INSERT INTO printers (name, model, purchase_price, lifetime_hours, power_watts, print_minutes, status, note, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           RETURNING *`,
-        )
-        .bind(input.name, input.model, input.purchasePrice, input.lifetimeHours, input.powerWatts, input.printMinutes, input.status, input.note, now, now)
-        .first<PrinterRow>();
+      const row = await insertPrinterStatement(db, input, new Date().toISOString()).first<PrinterRow>();
       if (!row) throw new Error('Insert returned no row');
       return toPrinter(row);
     },

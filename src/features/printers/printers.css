@@ -9,6 +9,14 @@
 .printer-card__facts dt { font-size: 13px; font-weight: 700; color: var(--soft); }
 .printer-card__facts dd { margin-top: 2px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .printer-card__big { font-size: 22px; font-weight: 900 !important; }
+.service-badge, .printer-card__service {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; border-radius: 999px;
+  font-size: 13px; font-weight: 900; text-decoration: none;
+}
+.service-badge { background: var(--red); color: var(--white); }
+.printer-card__service { background: var(--mist); border: 2px solid var(--rule); color: var(--ink); }
+@media (hover: hover) { .service-badge:hover, .printer-card__service:hover { text-decoration: underline; } }
+.printer-card__plan { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
 .printer-card__note { width: 100%; padding: 10px 12px; border-radius: 12px; border: 2px dashed var(--rule); font-size: 14px; line-height: 20px; }
 
 @media (max-width: 760px) {

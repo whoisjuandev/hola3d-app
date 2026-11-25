@@ -86,7 +86,7 @@ export function formatPesos(pesos: number): string {
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /** True for a YYYY-MM-DD string that is a real calendar date. */
-function isCalendarDate(value: unknown): value is string {
+export function isCalendarDate(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   const match = DATE_RE.exec(value);
   if (!match) return false;

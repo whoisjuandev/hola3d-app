@@ -1,9 +1,13 @@
 // Presentational pieces of the Impresoras screen. State lives in PrintersPage.
+import { Link } from 'react-router';
 import type { Printer, PrinterStatus } from '../../../shared/printers';
 import { PRINTER_STATUSES, PRINTER_STATUS_LABEL, wearCostPerHour } from '../../../shared/printers';
 import { FormDialog, type FieldSpec } from '../../ui/FormDialog';
 import { changedValues, parseWhole } from '../../ui/forms';
+import { Icon } from '../../ui/Icon';
 import { money } from '../orders/format';
+import { AdoptPlanButton } from '../service/components';
+import { planText } from '../service/format';
 import { hoursLabel, hoursText, hoursTextToMinutes } from './format';
 
 const STATUS_COLOR: Record<PrinterStatus, { bg: string; fg: string }> = {
@@ -17,7 +21,31 @@ export function StatusChip({ status }: { status: PrinterStatus }) {
   return <span className="chip" style={{ background: c.bg, color: c.fg }}>{PRINTER_STATUS_LABEL[status]}</span>;
 }
 
-export function PrinterCard({ printer, onEdit }: { printer: Printer; onEdit: () => void }) {
+/** A printer's service tasks: how many it has and how many are due. */
+export interface PrinterService { tasks: number; due: number }
+
+/** The service part of a printer card: a badge when tasks are due, a link when all is done, the plan when it has none. */
+function ServiceLine({ printer, service, onPlanAdopted }: { printer: Printer; service: PrinterService; onPlanAdopted: () => void }) {
+  const to = `/taller?impresora=${printer.id}`;
+  if (service.due > 0) {
+    return (
+      <Link to={to} className="service-badge" aria-label={`${printer.name}: ${service.due} ${service.due === 1 ? 'tarea vencida' : 'tareas vencidas'}, ver servicio técnico`}>
+        <Icon name="alert" size={16} />{service.due} {service.due === 1 ? 'tarea vencida' : 'tareas vencidas'}
+      </Link>
+    );
+  }
+  if (service.tasks > 0) return <Link to={to} className="printer-card__service"><Icon name="wrench" size={16} />Servicio al día</Link>;
+  return (
+    <div className="printer-card__plan">
+      <span className="muted">Sin plan de servicio.</span>
+      <AdoptPlanButton printerId={printer.id} printerName={printer.name} onAdopted={onPlanAdopted} />
+    </div>
+  );
+}
+
+export function PrinterCard({ printer, service, onEdit, onPlanAdopted }: {
+  printer: Printer; service?: PrinterService; onEdit: () => void; onPlanAdopted: () => void;
+}) {
   return (
     <article className="card printer-card" aria-labelledby={`printer-${printer.id}`}>
       <header className="printer-card__head">
@@ -35,6 +63,7 @@ export function PrinterCard({ printer, onEdit }: { printer: Printer; onEdit: () 
         <div><dt>Consumo</dt><dd>{printer.powerWatts} W</dd></div>
       </dl>
       {printer.note && <p className="printer-card__note">{printer.note}</p>}
+      {service && <ServiceLine printer={printer} service={service} onPlanAdopted={onPlanAdopted} />}
       <button type="button" className="btn btn--ghost btn--sm" onClick={onEdit} aria-label={`Editar ${printer.name}`}>Editar</button>
     </article>
   );
@@ -51,7 +80,10 @@ const FIELDS: FieldSpec[] = [
   { key: 'note', label: 'Nota', type: 'textarea', placeholder: 'Boquilla, repuestos, mañas…' },
 ];
 
-const EMPTY = { name: '', model: '', status: 'activa', purchasePrice: '', lifetimeHours: '', powerWatts: '', printMinutes: '0', note: '' };
+// Only when creating: the default service plan, on unless the owner unticks it.
+const PLAN_FIELD: FieldSpec = { key: 'servicePlan', label: 'Sumar el plan de servicio básico', type: 'checkbox', hint: planText() };
+
+const EMPTY = { name: '', model: '', status: 'activa', purchasePrice: '', lifetimeHours: '', powerWatts: '', printMinutes: '0', note: '', servicePlan: 'true' };
 
 function toForm(p: Printer): Record<string, string> {
   return {
@@ -66,6 +98,7 @@ function toApi(values: Record<string, string>): Record<string, unknown> {
   for (const [key, value] of Object.entries(values)) {
     if (key === 'printMinutes') out[key] = hoursTextToMinutes(value);
     else if (key === 'purchasePrice' || key === 'lifetimeHours' || key === 'powerWatts') out[key] = parseWhole(value);
+    else if (key === 'servicePlan') out[key] = value === 'true';
     else out[key] = value;
   }
   return out;
@@ -82,7 +115,7 @@ export function PrinterDialog({ printer, onCreate, onUpdate, onClose }: {
   return (
     <FormDialog
       title={printer ? `Editar ${printer.name}` : 'Nueva impresora'}
-      fields={FIELDS}
+      fields={printer ? FIELDS : [...FIELDS, PLAN_FIELD]}
       initial={initial}
       submitLabel={printer ? 'Guardar cambios' : 'Guardar impresora'}
       onClose={onClose}

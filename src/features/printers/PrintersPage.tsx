@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { Printer } from '../../../shared/printers';
+import type { ServiceTaskWithState } from '../../../shared/service';
 import { Icon } from '../../ui/Icon';
 import { useCollection } from '../../ui/useCollection';
 import { PHONE_QUERY, useMediaQuery } from '../../ui/useMediaQuery';
 import { ErrorBanner } from '../orders/components';
+import { fetchServiceTasks } from '../service/api';
 import { createPrinter, fetchPrinters, updatePrinter } from './api';
-import { PrinterCard, PrinterDialog } from './components';
+import { PrinterCard, PrinterDialog, type PrinterService } from './components';
 import '../orders/orders.css';
 import './printers.css';
 
@@ -15,6 +17,25 @@ export function PrintersPage() {
   // undefined: closed; null: creating; a printer: editing it.
   const [editing, setEditing] = useState<Printer | null | undefined>(undefined);
   const active = printers.filter((p) => p.status === 'activa').length;
+  // Service tasks, for each card's badge. Without them the cards just leave the service line out.
+  const [tasks, setTasks] = useState<ServiceTaskWithState[] | null>(null);
+  const [tasksAttempt, setTasksAttempt] = useState(0);
+  const reloadTasks = useCallback(() => setTasksAttempt((n) => n + 1), []);
+
+  useEffect(() => {
+    let alive = true;
+    fetchServiceTasks().then(
+      (list) => { if (alive) setTasks(list); },
+      () => { if (alive) setTasks(null); },
+    );
+    return () => { alive = false; };
+  }, [tasksAttempt]);
+
+  const serviceOf = (id: number): PrinterService | undefined => {
+    if (!tasks) return undefined;
+    const mine = tasks.filter((t) => t.printerId === id);
+    return { tasks: mine.length, due: mine.filter((t) => t.state.due).length };
+  };
 
   return (
     <div className="printers">
@@ -41,7 +62,7 @@ export function PrintersPage() {
 
       {status === 'ready' && printers.length > 0 && (
         <div className="printers__grid">
-          {printers.map((p) => <PrinterCard key={p.id} printer={p} onEdit={() => setEditing(p)} />)}
+          {printers.map((p) => <PrinterCard key={p.id} printer={p} service={serviceOf(p.id)} onEdit={() => setEditing(p)} onPlanAdopted={reloadTasks} />)}
         </div>
       )}
 
@@ -52,7 +73,7 @@ export function PrintersPage() {
       {editing !== undefined && (
         <PrinterDialog
           printer={editing}
-          onCreate={async (input) => add(await createPrinter(input))}
+          onCreate={async (input) => { add(await createPrinter(input)); reloadTasks(); }}
           onUpdate={async (id, changes) => replace(await updatePrinter(id, changes))}
           onClose={() => setEditing(undefined)}
         />

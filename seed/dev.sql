@@ -1,5 +1,7 @@
--- Sample clients, quotes, orders, printers, spools, print jobs and cost settings for local development only (npm run db:seed).
--- Never run against production. Contact details are made up.
+-- Sample clients, quotes, orders, printers, spools, print jobs, service tasks and logs, and cost settings for local
+-- development only (npm run db:seed). Never run against production. Contact details are made up.
+DELETE FROM service_logs;
+DELETE FROM service_tasks;
 DELETE FROM print_job_filaments;
 DELETE FROM print_jobs;
 DELETE FROM orders;
@@ -89,6 +91,32 @@ INSERT INTO print_job_filaments (id, job_id, spool_id, grams) VALUES
 -- Blanco 640 g, Amarillo 310 g, Lavanda 120 g, Celeste 455 g. The rows keep their updated_at.
 UPDATE printers SET print_minutes = print_minutes + (SELECT COALESCE(SUM(actual_minutes), 0) FROM print_jobs WHERE printer_id = printers.id AND status != 'planeada');
 UPDATE spools SET remaining_grams = remaining_grams - (SELECT COALESCE(SUM(grams), 0) FROM print_job_filaments WHERE spool_id = spools.id);
+
+-- Service tasks, counted from when each was last done. As of 2026-11-25 (La A1 at 74100 min, La Ender at 108450 min):
+--   1 A1 boquilla: 95 h of 100, 5 h left               2 A1 varillas: 215 h of 200, due by hours
+--   3 A1 correas: 185 h of 300, 115 h left             4 A1 cama: 36 days of 30, due by days
+--   5 Ender boquilla: 0 h of 100                       6 Ender varillas: 140,8 h of 200 but 116 days of 90, due by days
+--   7 Ender correas: 157,5 h of 300                    La vieja has no plan, so its card offers one.
+INSERT INTO service_tasks (id, printer_id, name, interval_hours, interval_days, last_done_minutes, last_done_date, active, created_at, updated_at) VALUES
+(1, 1, 'Limpiar boquilla', 100, NULL, 68400, '2026-11-10', 1, '2026-03-02T12:00:00Z', '2026-11-10T18:00:00Z'),
+(2, 1, 'Lubricar varillas', 200, NULL, 61200, '2026-09-15', 1, '2026-03-02T12:00:00Z', '2026-09-15T18:00:00Z'),
+(3, 1, 'Revisar correas', 300, NULL, 63000, '2026-09-15', 1, '2026-03-02T12:00:00Z', '2026-09-15T18:00:00Z'),
+(4, 1, 'Limpiar la cama PEI', NULL, 30, 70800, '2026-10-20', 1, '2026-05-04T12:00:00Z', '2026-10-20T18:00:00Z'),
+(5, 2, 'Limpiar boquilla', 100, NULL, 108450, '2026-11-18', 1, '2025-06-15T12:00:00Z', '2026-11-18T12:00:00Z'),
+(6, 2, 'Lubricar varillas', 200, 90, 100000, '2026-08-01', 1, '2025-06-15T12:00:00Z', '2026-08-01T12:00:00Z'),
+(7, 2, 'Revisar correas', 300, NULL, 99000, '2026-08-01', 1, '2025-06-15T12:00:00Z', '2026-08-01T12:00:00Z');
+
+-- Services done, with parts and cost. Total per printer: La A1 $5800, La Ender $11300, La vieja $0.
+INSERT INTO service_logs (id, printer_id, task_id, service_date, done, parts, cost, note, created_at, updated_at) VALUES
+(1, 2, 6, '2026-08-01', 'Lubricar varillas', 'Grasa de litio', 0, 'Quedaba grasa del pomo anterior.', '2026-08-01T12:00:00Z', '2026-08-01T12:00:00Z'),
+(2, 2, 7, '2026-08-01', 'Revisar correas', '', 0, '', '2026-08-01T12:00:00Z', '2026-08-01T12:00:00Z'),
+(3, 2, NULL, '2026-09-02', 'Cambio de ventilador de capa', 'Ventilador 4010 24 V', 4800, 'Hacía ruido.', '2026-09-02T12:00:00Z', '2026-09-02T12:00:00Z'),
+(4, 1, 2, '2026-09-15', 'Lubricar varillas', 'Grasa de litio', 2500, '', '2026-09-15T18:00:00Z', '2026-09-15T18:00:00Z'),
+(5, 1, 3, '2026-09-15', 'Revisar correas', '', 0, 'Tensadas las dos.', '2026-09-15T18:00:00Z', '2026-09-15T18:00:00Z'),
+(6, 1, 4, '2026-10-20', 'Limpiar la cama PEI', 'Alcohol isopropílico', 1800, '', '2026-10-20T18:00:00Z', '2026-10-20T18:00:00Z'),
+(7, 1, 1, '2026-11-10', 'Limpiar boquilla', 'Aguja de limpieza 0,4 mm', 1500, '', '2026-11-10T18:00:00Z', '2026-11-10T18:00:00Z'),
+(8, 2, 5, '2026-11-18', 'Cambio de boquilla', 'Boquilla 0,4 mm de latón × 2', 6500, 'Estaba tapada. Vuelve el lunes.', '2026-11-18T12:00:00Z', '2026-11-18T12:00:00Z'),
+(9, 3, NULL, '2026-01-10', 'Desarmada para repuestos', '', 0, 'Se guardaron el hotend y los motores.', '2026-01-10T12:00:00Z', '2026-01-10T12:00:00Z');
 
 -- The single cost settings row (the migration creates it with defaults; these are the sample shop's numbers).
 INSERT OR REPLACE INTO cost_settings (id, kwh_price, labour_per_hour, failure_percent, margin_percent, monthly_fixed_costs, monthly_print_hours, packaging_cost, rounding_step, commission_percent, updated_at) VALUES

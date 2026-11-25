@@ -3,6 +3,7 @@ import type { Order } from '../shared/orders';
 import type { PrintJob } from '../shared/print-jobs';
 import type { Printer } from '../shared/printers';
 import type { Quote } from '../shared/quotes';
+import type { ServiceLog, ServiceTask } from '../shared/service';
 import type { Spool } from '../shared/spools';
 
 /** An order as stored: its real cost is worked out from its print jobs when it is read. */
@@ -11,10 +12,17 @@ export type StoredOrder = Omit<Order, 'realCost' | 'realProfit'>;
 /** A print job as stored: its printer and spools by id only, their names read when it is read. Its cost is stored as logged. */
 export type StoredPrintJob = Omit<PrintJob, 'printer' | 'filaments'> & { filaments: { spoolId: number; grams: number }[] };
 
+/** A service task as stored: its printer by id only, the printer's name and minutes read when it is read. */
+export type StoredServiceTask = Omit<ServiceTask, 'printer' | 'printerMinutes'>;
+
+/** A service log entry as stored: its printer and task by id only, their names read when it is read. */
+export type StoredServiceLog = Omit<ServiceLog, 'printer' | 'task'>;
+
 /**
  * In-memory tables for the test adapters of modules that read each other's rows, like orders and their
  * clients. Orders and quotes keep their client id; their client name is read from `clients`, as in D1.
- * Print jobs change printer minutes and spool grams; orders add up the costs their jobs stored.
+ * Print jobs change printer minutes and spool grams; orders add up the costs their jobs stored. Service tasks read the
+ * minutes of their printer.
  */
 export interface MemoryTables {
   clients: Map<number, Client>;
@@ -23,12 +31,16 @@ export interface MemoryTables {
   printers: Map<number, Printer>;
   spools: Map<number, Spool>;
   printJobs: Map<number, StoredPrintJob>;
+  serviceTasks: Map<number, StoredServiceTask>;
+  serviceLogs: Map<number, StoredServiceLog>;
 }
 
 export interface WorkshopSeed {
   printers?: Printer[];
   spools?: Spool[];
   printJobs?: StoredPrintJob[];
+  serviceTasks?: StoredServiceTask[];
+  serviceLogs?: StoredServiceLog[];
 }
 
 export function memoryTables(clients: Client[] = [], orders: StoredOrder[] = [], quotes: Quote[] = [], workshop: WorkshopSeed = {}): MemoryTables {
@@ -42,5 +54,7 @@ export function memoryTables(clients: Client[] = [], orders: StoredOrder[] = [],
     printers: new Map((workshop.printers ?? []).map((p) => [p.id, { ...p }])),
     spools: new Map((workshop.spools ?? []).map((s) => [s.id, { ...s }])),
     printJobs: new Map((workshop.printJobs ?? []).map((j) => [j.id, structuredClone(j)])),
+    serviceTasks: new Map((workshop.serviceTasks ?? []).map((t) => [t.id, { ...t }])),
+    serviceLogs: new Map((workshop.serviceLogs ?? []).map((l) => [l.id, { ...l }])),
   };
 }

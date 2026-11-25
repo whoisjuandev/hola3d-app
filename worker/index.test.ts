@@ -38,6 +38,12 @@ describe('API dispatch', () => {
     expect(await get('/api/orders/0142/jobs')).toEqual({ status: 404, body: { error: 'No existe el pedido #0142.' } });
   });
 
+  it('sends service paths, and the service plan of a printer, to the service module', async () => {
+    expect(await get('/api/service/tasks')).toEqual({ status: 200, body: { tasks: [] } });
+    expect(await get('/api/service/logs')).toEqual({ status: 200, body: { logs: [], totals: [] } });
+    expect(await get('/api/printers/1/service-plan')).toEqual({ status: 405, body: { error: 'Método no permitido.' } });
+  });
+
   it('answers 404 when no module owns the path', async () => {
     expect(await get('/api/nada')).toEqual({ status: 404, body: { error: 'Esa ruta no existe.' } });
   });

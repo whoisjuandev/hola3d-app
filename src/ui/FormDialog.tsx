@@ -7,7 +7,8 @@ import './form-dialog.css';
 export interface FieldSpec {
   key: string;
   label: string;
-  type?: 'text' | 'select' | 'color' | 'textarea' | 'date';
+  /** A checkbox holds 'true' or 'false'. */
+  type?: 'text' | 'select' | 'color' | 'textarea' | 'date' | 'checkbox';
   options?: readonly { value: string; label: string }[];
   inputMode?: 'numeric' | 'decimal' | 'tel' | 'email';
   placeholder?: string;
@@ -84,7 +85,23 @@ export function FormDialog({ title, fields, initial, submitLabel, onSubmit, onCl
         </div>
         {banner && <p className="field__error" role="alert">{banner}</p>}
         <div className="form-dialog__grid">
-          {fields.map((f) => (
+          {fields.map((f) => f.type === 'checkbox' ? (
+            <div key={f.key} className="field form-dialog__wide">
+              <label className="field__check">
+                <input
+                  type="checkbox"
+                  id={`${uid}-${f.key}`}
+                  checked={values[f.key] === 'true'}
+                  onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.checked ? 'true' : 'false' }))}
+                  aria-describedby={errors[f.key] ? `${uid}-${f.key}-err` : f.hint ? `${uid}-${f.key}-hint` : undefined}
+                />
+                {f.label}
+              </label>
+              {errors[f.key]
+                ? <span id={`${uid}-${f.key}-err`} className="field__error">{errors[f.key]}</span>
+                : f.hint && <span id={`${uid}-${f.key}-hint`} className="muted">{f.hint}</span>}
+            </div>
+          ) : (
             <div key={f.key} className={f.type === 'textarea' ? 'field form-dialog__wide' : 'field'}>
               <label className="field__label" htmlFor={`${uid}-${f.key}`}>{f.label}</label>
               {control(f)}

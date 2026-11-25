@@ -12,6 +12,7 @@ import { PrintersPage } from './features/printers/PrintersPage';
 import { QuotePage } from './features/quotes/QuotePage';
 import { QuotePrintPage } from './features/quotes/QuotePrintPage';
 import { QuotesPage } from './features/quotes/QuotesPage';
+import { ServicePage } from './features/service/ServicePage';
 import { SpoolsPage } from './features/spools/SpoolsPage';
 import { ComingSoon } from './screens/ComingSoon';
 
@@ -28,7 +29,7 @@ const router = createBrowserRouter([
       { path: 'presupuestos/:id', element: <QuotePage /> },
       { path: 'proyectos', element: <ComingSoon title="Proyectos" /> },
       { path: 'agenda', element: <ComingSoon title="Agenda" /> },
-      { path: 'taller', element: <ComingSoon title="Servicio técnico" /> },
+      { path: 'taller', element: <ServicePage /> },
       { path: 'impresoras', element: <PrintersPage /> },
       { path: 'filamento', element: <SpoolsPage /> },
       { path: 'calculadora', element: <CalculatorPage /> },
