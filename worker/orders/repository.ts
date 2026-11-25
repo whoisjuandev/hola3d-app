@@ -1,6 +1,8 @@
 import type { NewOrder, Order, Stage, Channel } from '../../shared/orders';
 import { formatOrderNumber } from '../../shared/orders';
-import type { MemoryTables } from '../memory';
+import { realProfit, type RealCost } from '../../shared/print-jobs';
+import type { MemoryTables, StoredOrder } from '../memory';
+import { d1RealCosts, memoryRealCost } from '../print-jobs/repository';
 
 /** What storage needs to create an order: the validated request with its client already resolved to an id. */
 export type OrderInput = Omit<NewOrder, 'client' | 'clientId'>;
@@ -36,7 +38,12 @@ interface OrderRow {
   updated_at: string;
 }
 
-function toOrder(row: OrderRow): Order {
+/** The order with its real cost (from its print jobs) and real profit; both null while it has no printed job. */
+function withRealCost(order: StoredOrder, cost: RealCost | null): Order {
+  return { ...order, realCost: cost === null ? null : cost.total, realProfit: realProfit(order.price, cost) };
+}
+
+function toOrder(row: OrderRow): StoredOrder {
   return {
     id: row.id,
     item: row.item,
@@ -91,25 +98,32 @@ export function insertOrderStatement(
 
 /** Adapter: D1 storage. Orders sort by due date, undated ones last. */
 export function d1OrderRepository(db: D1Database): OrderRepository {
+  /** Every order read goes through here, so each one carries its real cost. */
+  const read = async (rows: OrderRow[]): Promise<Order[]> => {
+    const orders = rows.map(toOrder);
+    const costs = await d1RealCosts(db, orders.map((o) => o.id));
+    return orders.map((o) => withRealCost(o, costs.get(o.id) ?? null));
+  };
+
   const get = async (id: string) => {
     const row = await db.prepare(`${SELECT} WHERE orders.id = ?`).bind(id).first<OrderRow>();
-    return row ? toOrder(row) : null;
+    return row ? (await read([row]))[0] : null;
   };
 
   return {
     async list() {
       const { results } = await db.prepare(`${SELECT} ${ORDER_BY}`).all<OrderRow>();
-      return results.map(toOrder);
+      return read(results);
     },
 
     async listByClient(clientId) {
       const { results } = await db.prepare(`${SELECT} WHERE orders.client_id = ? ${ORDER_BY}`).bind(clientId).all<OrderRow>();
-      return results.map(toOrder);
+      return read(results);
     },
 
     async listByQuote(quoteId) {
       const { results } = await db.prepare(`${SELECT} WHERE orders.quote_id = ? ORDER BY CAST(orders.id AS INTEGER)`).bind(quoteId).all<OrderRow>();
-      return results.map(toOrder);
+      return read(results);
     },
 
     get,
@@ -131,17 +145,17 @@ export function d1OrderRepository(db: D1Database): OrderRepository {
   };
 }
 
-/** The order with its client's current name, as the D1 adapter reads it. */
-export function memoryReadOrder(tables: MemoryTables, o: Order): Order {
+/** The order with its client's current name and its real cost, as the D1 adapter reads it. */
+export function memoryReadOrder(tables: MemoryTables, o: StoredOrder): Order {
   const name = o.clientId === null ? undefined : tables.clients.get(o.clientId)?.name;
-  return name === undefined ? o : { ...o, client: name };
+  return withRealCost(name === undefined ? o : { ...o, client: name }, memoryRealCost(tables, o.id));
 }
 
 /** Insert an order in the in-memory tables, numbered like the D1 adapter. Synchronous, so callers can stay atomic. */
 export function memoryInsertOrder(tables: MemoryTables, input: OrderInput, clientId: number, quoteId: number | null = null): Order {
   const max = Math.max(0, ...[...tables.orders.keys()].map(Number));
   const now = new Date().toISOString();
-  const order: Order = {
+  const order: StoredOrder = {
     ...input, id: formatOrderNumber(max + 1), client: '', clientId, quoteId, stage: 'nuevo', paid: false, createdAt: now, updatedAt: now,
   };
   tables.orders.set(order.id, order);
@@ -151,7 +165,7 @@ export function memoryInsertOrder(tables: MemoryTables, input: OrderInput, clien
 /** Adapter: in-memory storage for tests. Shares its tables with the in-memory client and quote repositories. */
 export function memoryOrderRepository(tables: MemoryTables): OrderRepository {
   const { orders } = tables;
-  const read = (o: Order): Order => memoryReadOrder(tables, o);
+  const read = (o: StoredOrder): Order => memoryReadOrder(tables, o);
   return {
     async list() {
       return [...orders.values()].map(read);

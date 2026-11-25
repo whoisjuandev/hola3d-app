@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Client } from '../../shared/clients';
+import type { CostSettings } from '../../shared/cost-settings';
 import type { Order } from '../../shared/orders';
+import type { Printer } from '../../shared/printers';
+import type { Spool } from '../../shared/spools';
 import { memoryClientRepository } from '../clients/repository';
 import { memoryTables } from '../memory';
 import { memoryOrderRepository } from './repository';
@@ -14,7 +17,7 @@ const cafe: Client = {
 const base: Order = {
   id: '0142', item: 'Llaveros con logo × 12', client: 'Café Nube', clientId: 1, quoteId: null, channel: 'Instagram', stage: 'imprimiendo',
   dueDate: '2026-11-23', dueTime: null, price: 36000, deposit: 18000, paid: false, material: 'PLA', note: '',
-  createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z',
+  createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z', realCost: null, realProfit: null,
 };
 
 function call(method: string, path: string, body?: unknown) {
@@ -39,6 +42,37 @@ describe('GET /api/orders', () => {
     const { status, body } = await read(await run());
     expect(status).toBe(200);
     expect(body).toEqual({ orders: [base] });
+  });
+
+  it('carries the real cost of the order\'s print jobs, failed ones included, and the real profit', async () => {
+    const stamp = '2026-11-01T00:00:00.000Z';
+    const a1: Printer = {
+      id: 1, name: 'La A1', model: '', purchasePrice: 720000, lifetimeHours: 5000, powerWatts: 100, printMinutes: 0, status: 'activa',
+      note: '', createdAt: stamp, updatedAt: stamp,
+    };
+    const white: Spool = {
+      id: 1, material: 'PLA', colorName: 'Blanco', colorHex: '#ffffff', brand: '', netGrams: 1000, remainingGrams: 500, price: 21000,
+      lowStockGrams: 150, note: '', createdAt: stamp, updatedAt: stamp,
+    };
+    const settings: CostSettings = {
+      kwhPrice: 200, labourPerHour: 6000, failurePercent: 10, marginPercent: 50, monthlyFixedCosts: 120000, monthlyPrintHours: 200,
+      packagingCost: 800, roundingStep: 100, commissionPercent: 0, updatedAt: stamp,
+    };
+    const job = {
+      id: 1, orderId: '0142', printerId: 1, status: 'terminada' as const, result: 'ok' as const, plannedStart: null, estimatedMinutes: null,
+      actualMinutes: 120, note: '', filaments: [{ spoolId: 1, grams: 36 }], createdAt: stamp, updatedAt: stamp,
+    };
+    const failed = { ...job, id: 2, status: 'fallida' as const, result: 'fallida' as const, actualMinutes: 60, filaments: [{ spoolId: 1, grams: 10 }] };
+    const other = { ...base, id: '0143' };
+    const tables = memoryTables([cafe], [base, other], [], { printers: [a1], spools: [white], printJobs: [job, failed], settings });
+    const url = new URL('https://app.test/api/orders');
+    const res = await handleOrders(new Request(url), url, memoryOrderRepository(tables), memoryClientRepository(tables));
+    // Job 1: material 36 × 21 = 756, energy 0.1 × 2 × 200 = 40, wear 2 × 144 = 288, fixed 2 × 600 = 1200 → 2284.
+    // Job 2 (failed): 210 + 20 + 144 + 600 = 974. Real cost 3258; profit 36000 − 3258 = 32742.
+    expect(await read(res)).toEqual({
+      status: 200,
+      body: { orders: [{ ...base, realCost: 3258, realProfit: 32742 }, { ...other, realCost: null, realProfit: null }] },
+    });
   });
 
   it('reads the client name through the client', async () => {

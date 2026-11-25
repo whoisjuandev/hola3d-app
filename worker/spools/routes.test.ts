@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Spool } from '../../shared/spools';
-import { memorySpoolRepository } from './repository';
+import { memorySpoolRepository, type SpoolRepository } from './repository';
 import { handleSpools } from './routes';
 
 const base: Spool = {
@@ -70,6 +70,31 @@ describe('PUT /api/spools/:id', () => {
     expect(status).toBe(200);
     expect(body.spool).toMatchObject({ ...base, remainingGrams: 120, note: 'Pedir otra', updatedAt: expect.any(String) });
     expect(await repo.get(1)).toMatchObject({ remainingGrams: 120, note: 'Pedir otra', netGrams: 1000, price: 21000 });
+  });
+
+  it('writes only the fields sent, so grams a print job took after the read are kept', async () => {
+    const repo = memorySpoolRepository([base]);
+    const written: unknown[] = [];
+    const racing: SpoolRepository = {
+      ...repo,
+      // A job takes 60 g right after the route reads the spool.
+      get: async (id) => { const s = await repo.get(id); await repo.update(id, { remainingGrams: 760 }); return s; },
+      update: async (id, changes) => { written.push(changes); return repo.update(id, changes); },
+    };
+    const url = new URL('https://app.test/api/spools/1');
+    const res = await handleSpools(new Request(url, { method: 'PUT', body: JSON.stringify({ colorHex: '#FAFAFA', lowStockGrams: 200 }) }), url, racing);
+    const { status, body } = await read(res);
+    expect(status).toBe(200);
+    expect(written).toEqual([{ colorHex: '#fafafa', lowStockGrams: 200 }]);
+    expect(body.spool).toMatchObject({ colorHex: '#fafafa', lowStockGrams: 200, remainingGrams: 760 });
+    expect(await repo.get(1)).toMatchObject({ ...base, colorHex: '#fafafa', lowStockGrams: 200, remainingGrams: 760, updatedAt: expect.any(String) });
+  });
+
+  it('still fills a spool to its net weight when remaining grams are sent empty', async () => {
+    const { run, repo } = call('PUT', '/api/spools/1', { remainingGrams: '' });
+    const { status } = await read(await run());
+    expect(status).toBe(200);
+    expect((await repo.get(1))?.remainingGrams).toBe(1000);
   });
 
   it('rejects remaining grams below 0 without changing the spool', async () => {

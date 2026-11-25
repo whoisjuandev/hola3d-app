@@ -99,9 +99,32 @@ export interface CalcResult {
   settings: CostSettingsInput; // the settings the prices came from
 }
 
-function spoolLabel(spool: CalcSpool): string {
+/** "PLA Blanco · Grilon3", or "PLA Blanco" without a brand. */
+export function spoolLabel(spool: Pick<CalcSpool, 'material' | 'colorName' | 'brand'>): string {
   const name = `${spool.material} ${spool.colorName}`;
   return spool.brand ? `${name} · ${spool.brand}` : name;
+}
+
+/** Pesos per gram of a spool: what was paid ÷ its net weight. Not rounded. */
+export function spoolPricePerGram(spool: Pick<CalcSpool, 'price' | 'netGrams'>): number {
+  return spool.price / spool.netGrams;
+}
+
+// The terms that grow with print time, each in whole pesos. The real cost of print jobs uses them too.
+
+/** Energy: watts ÷ 1000 × hours × kWh price. */
+export function energyCost(printer: Pick<CalcPrinter, 'powerWatts'>, hours: number, settings: Pick<CostSettingsInput, 'kwhPrice'>): number {
+  return Math.round((printer.powerWatts / 1000) * hours * settings.kwhPrice);
+}
+
+/** Machine wear: hours × purchase price ÷ lifetime hours. */
+export function machineWearCost(printer: Pick<CalcPrinter, 'purchasePrice' | 'lifetimeHours'>, hours: number): number {
+  return Math.round((hours * printer.purchasePrice) / printer.lifetimeHours);
+}
+
+/** Fixed costs: hours × monthly fixed costs ÷ monthly print hours. */
+export function fixedCostsFor(hours: number, settings: Pick<CostSettingsInput, 'monthlyFixedCosts' | 'monthlyPrintHours'>): number {
+  return Math.round((hours * settings.monthlyFixedCosts) / settings.monthlyPrintHours);
 }
 
 /** Up to the next multiple of `step`. The small tolerance keeps 10000.000000001 at 10000. */
@@ -120,7 +143,7 @@ function priceLine(line: CalcLineInput, printers: CalcPrinter[], spools: CalcSpo
 
   const filaments = line.filaments.map((use): FilamentUseResult & { exact: number } => {
     const spool = use.spoolId == null ? undefined : spools.find((x) => x.id === use.spoolId);
-    const pricePerGram = spool ? spool.price / spool.netGrams : use.pricePerKg / 1000;
+    const pricePerGram = spool ? spoolPricePerGram(spool) : use.pricePerKg / 1000;
     const grams = use.gramsPerUnit * line.quantity;
     const exact = grams * pricePerGram;
     return {
@@ -136,9 +159,9 @@ function priceLine(line: CalcLineInput, printers: CalcPrinter[], spools: CalcSpo
 
   // Each term is rounded to whole pesos, and later terms build on the rounded ones, so the breakdown adds up.
   const material = Math.round(filaments.reduce((sum, f) => sum + f.exact, 0));
-  const energy = printer ? Math.round((printer.powerWatts / 1000) * hours * s.kwhPrice) : 0;
-  const machineWear = printer ? Math.round((hours * printer.purchasePrice) / printer.lifetimeHours) : 0;
-  const fixedCosts = Math.round((hours * s.monthlyFixedCosts) / s.monthlyPrintHours);
+  const energy = printer ? energyCost(printer, hours, s) : 0;
+  const machineWear = printer ? machineWearCost(printer, hours) : 0;
+  const fixedCosts = fixedCostsFor(hours, s);
   const labour = Math.round(((line.prepMinutes + line.postMinutes) / 60) * s.labourPerHour);
   const packaging = line.packaging;
   const failureAllowance = Math.round(((material + energy + machineWear) * s.failurePercent) / 100);

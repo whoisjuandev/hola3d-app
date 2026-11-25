@@ -1,11 +1,13 @@
 import type { Printer, PrinterInput, PrinterStatus } from '../../shared/printers';
+import type { MemoryTables } from '../memory';
 
 /** Port: what the printer routes need from storage. */
 export interface PrinterRepository {
   list(): Promise<Printer[]>;
   get(id: number): Promise<Printer | null>;
   create(input: PrinterInput): Promise<Printer>;
-  update(id: number, input: PrinterInput): Promise<Printer | null>;
+  /** Writes only the fields in `changes`, so it never overwrites minutes a print job added meanwhile. */
+  update(id: number, changes: Partial<PrinterInput>): Promise<Printer | null>;
 }
 
 interface PrinterRow {
@@ -38,6 +40,11 @@ function toPrinter(row: PrinterRow): Printer {
   };
 }
 
+const COLUMNS: Record<keyof PrinterInput, string> = {
+  name: 'name', model: 'model', purchasePrice: 'purchase_price', lifetimeHours: 'lifetime_hours', powerWatts: 'power_watts',
+  printMinutes: 'print_minutes', status: 'status', note: 'note',
+};
+
 /** Adapter: D1 storage. Printers sort by name. */
 export function d1PrinterRepository(db: D1Database): PrinterRepository {
   return {
@@ -65,23 +72,20 @@ export function d1PrinterRepository(db: D1Database): PrinterRepository {
       return toPrinter(row);
     },
 
-    async update(id, input) {
+    async update(id, changes) {
+      const keys = (Object.keys(changes) as (keyof PrinterInput)[]).filter((k) => k in COLUMNS);
       const row = await db
-        .prepare(
-          `UPDATE printers SET name = ?, model = ?, purchase_price = ?, lifetime_hours = ?, power_watts = ?, print_minutes = ?, status = ?, note = ?, updated_at = ?
-           WHERE id = ?
-           RETURNING *`,
-        )
-        .bind(input.name, input.model, input.purchasePrice, input.lifetimeHours, input.powerWatts, input.printMinutes, input.status, input.note, new Date().toISOString(), id)
+        .prepare(`UPDATE printers SET ${keys.map((k) => `${COLUMNS[k]} = ?, `).join('')}updated_at = ? WHERE id = ? RETURNING *`)
+        .bind(...keys.map((k) => changes[k]), new Date().toISOString(), id)
         .first<PrinterRow>();
       return row ? toPrinter(row) : null;
     },
   };
 }
 
-/** Adapter: in-memory storage for tests. */
-export function memoryPrinterRepository(seed: Printer[] = []): PrinterRepository {
-  const printers = new Map(seed.map((p) => [p.id, { ...p }]));
+/** Adapter: in-memory storage for tests. With tables, it shares them with the in-memory print job repository. */
+export function memoryPrinterRepository(source: Printer[] | MemoryTables = []): PrinterRepository {
+  const printers = Array.isArray(source) ? new Map(source.map((p) => [p.id, { ...p }])) : source.printers;
   return {
     async list() {
       return [...printers.values()];
@@ -96,10 +100,10 @@ export function memoryPrinterRepository(seed: Printer[] = []): PrinterRepository
       printers.set(id, printer);
       return printer;
     },
-    async update(id, input) {
+    async update(id, changes) {
       const current = printers.get(id);
       if (!current) return null;
-      const updated: Printer = { ...current, ...input, updatedAt: new Date().toISOString() };
+      const updated: Printer = { ...current, ...changes, updatedAt: new Date().toISOString() };
       printers.set(id, updated);
       return updated;
     },

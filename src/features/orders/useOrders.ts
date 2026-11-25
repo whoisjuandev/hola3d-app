@@ -64,8 +64,11 @@ export function useOrders() {
     return order;
   }, []);
 
+  /** Put a saved order in the list, as the API answered it (a logged print job changes its real cost). */
+  const update = useCallback((order: Order) => setOrders((list) => list.map((o) => (o.id === order.id ? order : o))), []);
+
   return {
-    orders, status, error, lastChange, load, move, undo, create,
+    orders, status, error, lastChange, load, move, undo, create, update,
     dismissError: () => setError(null),
     dismissChange: () => setLastChange(null),
   };

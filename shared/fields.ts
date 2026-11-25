@@ -31,3 +31,8 @@ export function readInteger(body: Body, errors: Errors, key: string, min: number
   errors[key] = message;
   return null;
 }
+
+/** The validated values of only the keys the request sent, so an edit writes those and leaves every other column alone. */
+export function sentFields<T extends object>(value: T, body: Body): Partial<T> {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => Object.hasOwn(body, key))) as Partial<T>;
+}

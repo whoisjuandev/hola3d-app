@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Printer } from '../../shared/printers';
-import { memoryPrinterRepository } from './repository';
+import { memoryPrinterRepository, type PrinterRepository } from './repository';
 import { handlePrinters } from './routes';
 
 const base: Printer = {
@@ -71,6 +71,24 @@ describe('PUT /api/printers/:id', () => {
     expect(status).toBe(200);
     expect(body.printer).toMatchObject({ ...base, status: 'en_servicio', note: 'Boquilla tapada', updatedAt: expect.any(String) });
     expect(await repo.get(1)).toMatchObject({ status: 'en_servicio', note: 'Boquilla tapada', printMinutes: 7200, purchasePrice: 650000 });
+  });
+
+  it('writes only the fields sent, so minutes a print job added after the read are kept', async () => {
+    const repo = memoryPrinterRepository([base]);
+    const written: unknown[] = [];
+    const racing: PrinterRepository = {
+      ...repo,
+      // A job logs 90 minutes right after the route reads the printer.
+      get: async (id) => { const p = await repo.get(id); await repo.update(id, { printMinutes: 7290 }); return p; },
+      update: async (id, changes) => { written.push(changes); return repo.update(id, changes); },
+    };
+    const url = new URL('https://app.test/api/printers/1');
+    const res = await handlePrinters(new Request(url, { method: 'PUT', body: JSON.stringify({ note: ' Boquilla nueva ', id: 5 }) }), url, racing);
+    const { status, body } = await read(res);
+    expect(status).toBe(200);
+    expect(written).toEqual([{ note: 'Boquilla nueva' }]);
+    expect(body.printer).toMatchObject({ note: 'Boquilla nueva', printMinutes: 7290 });
+    expect(await repo.get(1)).toMatchObject({ ...base, note: 'Boquilla nueva', printMinutes: 7290, updatedAt: expect.any(String) });
   });
 
   it('can set the accumulated print minutes', async () => {

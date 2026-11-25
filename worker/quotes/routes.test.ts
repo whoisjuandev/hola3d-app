@@ -22,6 +22,7 @@ const lucia: Client = { id: 2, name: 'Lucía M.', phone: '', instagram: '', emai
 const existingOrder: Order = {
   id: '0142', item: 'Maceta', client: 'Café Nube', clientId: 1, quoteId: null, channel: 'Instagram', stage: 'imprimiendo',
   dueDate: null, dueTime: null, price: 12000, deposit: null, paid: false, material: '', note: '', createdAt: stamp, updatedAt: stamp,
+  realCost: null, realProfit: null,
 };
 
 const a1: Printer = {
@@ -289,6 +290,7 @@ describe('POST /api/quotes/:id/accept', () => {
     ].map((o) => ({
       ...o, client: 'Café Nube', clientId: 1, quoteId: 1, channel: 'Instagram', stage: 'nuevo', dueDate: null, dueTime: null,
       deposit: null, paid: false, material: '', note: '', createdAt: expect.any(String), updatedAt: expect.any(String),
+      realCost: null, realProfit: null,
     }));
     expect(body).toEqual({ quote: { ...sent, status: 'aceptado', updatedAt: expect.any(String) }, orders: made });
     expect(await orders.list()).toEqual([existingOrder, ...made]);

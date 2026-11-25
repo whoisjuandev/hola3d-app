@@ -1,3 +1,4 @@
+import { sentFields } from '../../shared/fields';
 import { validatePrinter } from '../../shared/printers';
 import { isJsonObject, json, problem, readJson } from '../http';
 import type { PrinterRepository } from './repository';
@@ -30,7 +31,8 @@ export async function handlePrinters(request: Request, url: URL, repo: PrinterRe
     // Fields left out of the body keep their stored value.
     const result = validatePrinter({ ...current, ...body });
     if (!result.ok) return json({ error: INVALID, fields: result.errors }, 422);
-    const printer = await repo.update(id, result.value);
+    // Only the fields sent are written: a print job may have changed the counters since the read above.
+    const printer = await repo.update(id, sentFields(result.value, body));
     if (!printer) return problem(404, `No existe la impresora ${id}.`);
     return json({ printer });
   }

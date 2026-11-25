@@ -1,0 +1,254 @@
+import { describe, expect, it } from 'vitest';
+import type { Client } from '../../shared/clients';
+import type { CostSettings } from '../../shared/cost-settings';
+import type { Order } from '../../shared/orders';
+import type { PrintJob } from '../../shared/print-jobs';
+import type { Printer } from '../../shared/printers';
+import type { Spool } from '../../shared/spools';
+import { memoryTables, type StoredPrintJob } from '../memory';
+import { memoryOrderRepository } from '../orders/repository';
+import { memoryPrinterRepository } from '../printers/repository';
+import { memorySpoolRepository, type SpoolRepository } from '../spools/repository';
+import { memoryPrintJobRepository } from './repository';
+import { handlePrintJobs } from './routes';
+
+const stamp = '2026-11-01T00:00:00.000Z';
+const cafe: Client = { id: 1, name: 'Café Nube', phone: '', instagram: '', email: '', note: '', createdAt: stamp, updatedAt: stamp };
+const keychains: Order = {
+  id: '0142', item: 'Llaveros con logo × 12', client: 'Café Nube', clientId: 1, quoteId: null, channel: 'Instagram', stage: 'imprimiendo',
+  dueDate: null, dueTime: null, price: 36000, deposit: null, paid: false, material: '', note: '', createdAt: stamp, updatedAt: stamp,
+  realCost: null, realProfit: null,
+};
+const pot: Order = { ...keychains, id: '0143', item: 'Maceta', price: 12000 };
+
+const a1: Printer = {
+  id: 1, name: 'La A1', model: '', purchasePrice: 720000, lifetimeHours: 5000, powerWatts: 100, printMinutes: 7200, status: 'activa',
+  note: '', createdAt: stamp, updatedAt: stamp,
+};
+const white: Spool = {
+  id: 1, material: 'PLA', colorName: 'Blanco', colorHex: '#ffffff', brand: 'Grilon3', netGrams: 1000, remainingGrams: 640, price: 21000,
+  lowStockGrams: 150, note: '', createdAt: stamp, updatedAt: stamp,
+};
+const yellow: Spool = { ...white, id: 2, colorName: 'Amarillo', colorHex: '#ffc42e', brand: '', remainingGrams: 30 };
+// kWh $200, fixed costs $600 per print hour; labour, packaging and failures do not enter the real cost.
+const settings: CostSettings = {
+  kwhPrice: 200, labourPerHour: 6000, failurePercent: 10, marginPercent: 50, monthlyFixedCosts: 120000, monthlyPrintHours: 200,
+  packagingCost: 800, roundingStep: 100, commissionPercent: 0, updatedAt: stamp,
+};
+
+// Already logged: 2 h on La A1 with 36 g of white. Material 756, energy 40, wear 288, fixed 1200 = 2284.
+const logged: StoredPrintJob = {
+  id: 1, orderId: '0142', printerId: 1, status: 'terminada', result: 'ok', plannedStart: null, estimatedMinutes: null, actualMinutes: 120,
+  note: 'Primera tanda', filaments: [{ spoolId: 1, grams: 36 }], createdAt: stamp, updatedAt: stamp,
+};
+const loggedView: PrintJob = {
+  ...logged, printer: 'La A1', filaments: [{ spoolId: 1, spool: 'PLA Blanco · Grilon3', colorHex: '#ffffff', grams: 36 }],
+};
+
+function setup(options: { spools?: (repo: SpoolRepository) => SpoolRepository } = {}) {
+  const tables = memoryTables([cafe], [keychains, pot], [], { printers: [a1], spools: [white, yellow], printJobs: [logged], settings });
+  const printers = memoryPrinterRepository(tables);
+  const spoolRepo = memorySpoolRepository(tables);
+  const deps = {
+    jobs: memoryPrintJobRepository(tables),
+    orders: memoryOrderRepository(tables),
+    printers,
+    spools: options.spools ? options.spools(spoolRepo) : spoolRepo,
+  };
+  const call = async (method: string, path: string, body?: unknown) => {
+    const url = new URL(`https://app.test${path}`);
+    const payload = body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body);
+    const res = await handlePrintJobs(new Request(url, { method, body: payload, headers: { 'Content-Type': 'application/json' } }), url, deps);
+    if (!res) throw new Error('route not handled');
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  };
+  /** What a log or a delete may change, read through the API ports. */
+  const snapshot = async () => ({
+    printMinutes: (await printers.get(1))?.printMinutes,
+    grams: (await spoolRepo.list()).map((s) => [s.id, s.remainingGrams]),
+    jobs: (await call('GET', '/api/orders/0142/jobs')).body.jobs,
+    otherJobs: (await call('GET', '/api/orders/0143/jobs')).body.jobs,
+  });
+  return { ...deps, call, snapshot };
+}
+
+const newJob = { printerId: 1, actualMinutes: 90, result: 'ok', note: 'Segunda tanda', filaments: [{ spoolId: 1, grams: 30 }, { spoolId: 2, grams: 30 }] };
+
+describe('GET /api/orders/:id/jobs', () => {
+  it('lists the jobs of an order with printer and spool names, and the real cost', async () => {
+    const { call } = setup();
+    expect(await call('GET', '/api/orders/0142/jobs')).toEqual({
+      status: 200,
+      body: {
+        jobs: [loggedView],
+        cost: { material: 756, energy: 40, machineWear: 288, fixedCosts: 1200, total: 2284, minutes: 120, grams: 36, jobs: 1, failedJobs: 0 },
+      },
+    });
+  });
+
+  it('answers an empty list and no cost for an order without jobs', async () => {
+    const { call } = setup();
+    expect(await call('GET', '/api/orders/0143/jobs')).toEqual({ status: 200, body: { jobs: [], cost: null } });
+  });
+
+  it('answers 404 for an order that does not exist', async () => {
+    const { call } = setup();
+    expect(await call('GET', '/api/orders/0999/jobs')).toEqual({ status: 404, body: { error: 'No existe el pedido #0999.' } });
+  });
+});
+
+describe('POST /api/orders/:id/jobs', () => {
+  it('logs the job, adds the minutes to the printer and takes the grams off each spool', async () => {
+    const { call, snapshot } = setup();
+    const { status, body } = await call('POST', '/api/orders/0142/jobs', newJob);
+    expect(status).toBe(201);
+    const job: PrintJob = {
+      id: 2, orderId: '0142', printerId: 1, printer: 'La A1', status: 'terminada', result: 'ok', plannedStart: null, estimatedMinutes: null,
+      actualMinutes: 90, note: 'Segunda tanda',
+      filaments: [
+        { spoolId: 1, spool: 'PLA Blanco · Grilon3', colorHex: '#ffffff', grams: 30 },
+        { spoolId: 2, spool: 'PLA Amarillo', colorHex: '#ffc42e', grams: 30 },
+      ],
+      createdAt: expect.any(String) as unknown as string, updatedAt: expect.any(String) as unknown as string,
+    };
+    // Job 2: material 60 g × 21 = 1260, energy 0.1 × 1.5 × 200 = 30, wear 1.5 × 144 = 216, fixed 1.5 × 600 = 900 → 2406.
+    expect(body).toEqual({ job, order: { ...keychains, realCost: 2284 + 2406, realProfit: 36000 - 4690 } });
+    expect(await snapshot()).toEqual({
+      printMinutes: 7290, grams: [[1, 610], [2, 0]], jobs: [loggedView, job], otherJobs: [],
+    });
+  });
+
+  it('marks a failed job fallida and still counts its minutes, grams and cost', async () => {
+    const { call, snapshot } = setup();
+    const { status, body } = await call('POST', '/api/orders/0143/jobs', { ...newJob, result: 'fallida', filaments: [{ spoolId: 1, grams: 20 }] });
+    expect(status).toBe(201);
+    expect(body.job).toMatchObject({ orderId: '0143', status: 'fallida', result: 'fallida', actualMinutes: 90 });
+    // material 420 + energy 30 + wear 216 + fixed 900 = 1566
+    expect(body.order).toMatchObject({ id: '0143', realCost: 1566, realProfit: 12000 - 1566 });
+    expect(await snapshot()).toMatchObject({ printMinutes: 7290, grams: [[1, 620], [2, 30]] });
+  });
+
+  async function expectRejected(body: unknown, fields: Record<string, string>) {
+    const { call, snapshot } = setup();
+    const before = await snapshot();
+    expect(await call('POST', '/api/orders/0142/jobs', body)).toEqual({ status: 422, body: { error: 'Revisá los datos de la impresión.', fields } });
+    expect(await snapshot()).toEqual(before);
+  }
+
+  it('rejects a spool without enough grams and changes nothing', async () => {
+    await expectRejected(
+      { ...newJob, filaments: [{ spoolId: 1, grams: 30 }, { spoolId: 2, grams: 31 }] },
+      { filaments: 'A PLA Amarillo le quedan 30 g y cargaste 31 g.' },
+    );
+  });
+
+  it('rejects a printer that does not exist and changes nothing', async () => {
+    await expectRejected({ ...newJob, printerId: 9 }, { printerId: 'Esa impresora no existe.' });
+  });
+
+  it('rejects a spool that does not exist and changes nothing', async () => {
+    await expectRejected({ ...newJob, filaments: [{ spoolId: 1, grams: 30 }, { spoolId: 7, grams: 5 }] }, { filaments: 'La bobina 7 no existe.' });
+  });
+
+  it('rejects minutes that are not above 0 and changes nothing', async () => {
+    await expectRejected({ ...newJob, actualMinutes: 0 }, { actualMinutes: 'Poné cuánto tardó: más de 0 minutos.' });
+  });
+
+  it('rejects the same spool twice and changes nothing', async () => {
+    await expectRejected(
+      { ...newJob, filaments: [{ spoolId: 1, grams: 10 }, { spoolId: 1, grams: 10 }] },
+      { filaments: 'Cada bobina va una sola vez: sumá sus gramos en una fila.' },
+    );
+  });
+
+  it('changes nothing when the grams ran out after the check, as when two logs race', async () => {
+    // The route's read still sees 640 g, as if another log landed right after it: the atomic write must refuse on its own.
+    let staleReads = 0;
+    const stale = (repo: SpoolRepository): SpoolRepository => ({
+      ...repo,
+      list: async () => {
+        const all = await repo.list();
+        return staleReads-- > 0 ? all.map((s) => (s.id === 1 ? { ...s, remainingGrams: 640 } : s)) : all;
+      },
+    });
+    const { call, snapshot } = setup({ spools: stale });
+    expect((await call('POST', '/api/orders/0143/jobs', { ...newJob, filaments: [{ spoolId: 1, grams: 620 }] })).status).toBe(201);
+    const before = await snapshot();
+    expect(before.grams).toEqual([[1, 20], [2, 30]]);
+    staleReads = 1;
+    expect(await call('POST', '/api/orders/0142/jobs', { ...newJob, filaments: [{ spoolId: 1, grams: 30 }] })).toEqual({
+      status: 422, body: { error: 'Revisá los datos de la impresión.', fields: { filaments: 'A PLA Blanco · Grilon3 le quedan 20 g y cargaste 30 g.' } },
+    });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('takes a spool down to exactly 0 g', async () => {
+    const { call, snapshot } = setup();
+    expect((await call('POST', '/api/orders/0142/jobs', { ...newJob, filaments: [{ spoolId: 2, grams: 30 }] })).status).toBe(201);
+    expect((await snapshot()).grams).toEqual([[1, 640], [2, 0]]);
+  });
+
+  it('answers 404 for an order that does not exist and changes nothing', async () => {
+    const { call, snapshot } = setup();
+    const before = await snapshot();
+    expect(await call('POST', '/api/orders/0999/jobs', newJob)).toEqual({ status: 404, body: { error: 'No existe el pedido #0999.' } });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('rejects a body that is not JSON and changes nothing', async () => {
+    const { call, snapshot } = setup();
+    const before = await snapshot();
+    expect(await call('POST', '/api/orders/0142/jobs', 'no es json')).toEqual({ status: 400, body: { error: 'El cuerpo tiene que ser JSON.' } });
+    expect(await snapshot()).toEqual(before);
+  });
+});
+
+describe('DELETE /api/orders/:id/jobs/:jobId', () => {
+  it('deletes the job and gives its minutes and grams back', async () => {
+    const { call, snapshot } = setup();
+    const before = await snapshot();
+    const logged2 = await call('POST', '/api/orders/0142/jobs', newJob);
+    expect(logged2.status).toBe(201);
+    const { status, body } = await call('DELETE', '/api/orders/0142/jobs/2');
+    expect(status).toBe(200);
+    expect(body).toEqual({ order: { ...keychains, realCost: 2284, realProfit: 36000 - 2284 } });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('deletes the last job of an order, leaving it without a real cost', async () => {
+    const { call, snapshot } = setup();
+    const { status, body } = await call('DELETE', '/api/orders/0142/jobs/1');
+    expect(status).toBe(200);
+    expect(body).toEqual({ order: keychains });
+    expect(await snapshot()).toEqual({ printMinutes: 7080, grams: [[1, 676], [2, 30]], jobs: [], otherJobs: [] });
+  });
+
+  it('answers 404 for a job of another order and changes nothing', async () => {
+    const { call, snapshot } = setup();
+    const before = await snapshot();
+    expect(await call('DELETE', '/api/orders/0143/jobs/1')).toEqual({ status: 404, body: { error: 'El pedido #0143 no tiene la impresión 1.' } });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('answers 404 the second time, giving nothing back twice', async () => {
+    const { call, snapshot } = setup();
+    expect((await call('DELETE', '/api/orders/0142/jobs/1')).status).toBe(200);
+    const after = await snapshot();
+    expect(await call('DELETE', '/api/orders/0142/jobs/1')).toEqual({ status: 404, body: { error: 'El pedido #0142 no tiene la impresión 1.' } });
+    expect(await snapshot()).toEqual(after);
+  });
+});
+
+it('rejects other methods', async () => {
+  const { call } = setup();
+  expect(await call('PUT', '/api/orders/0142/jobs')).toEqual({ status: 405, body: { error: 'Método no permitido.' } });
+  expect(await call('GET', '/api/orders/0142/jobs/1')).toEqual({ status: 405, body: { error: 'Método no permitido.' } });
+});
+
+it('leaves other paths to the caller', async () => {
+  const url = new URL('https://app.test/api/orders/0142/stage');
+  const { jobs, orders, printers, spools } = setup();
+  expect(await handlePrintJobs(new Request(url, { method: 'PUT' }), url, { jobs, orders, printers, spools })).toBeNull();
+  const list = new URL('https://app.test/api/orders');
+  expect(await handlePrintJobs(new Request(list), list, { jobs, orders, printers, spools })).toBeNull();
+});

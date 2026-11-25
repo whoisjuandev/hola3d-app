@@ -8,10 +8,10 @@ The internal workshop app for Hola3D, a 3D printing shop. It tracks every order 
 
 | Section | State |
 |---|---|
-| Pedidos (orders) | Works end to end: board, search, new order (pick a client or type a new one), stage moves |
+| Pedidos (orders) | Works end to end: board, search, new order (pick a client or type a new one), stage moves. The order detail logs print jobs (printer, time, grams per spool, result) and shows the real cost and real profit next to the price |
 | Clientes (clients) | List with search, create and edit. Client page with contact links, orders, total spent and balance owed |
-| Impresoras (printers) | List, create and edit. Shows accumulated print hours and machine wear per print hour |
-| Filamento (spools) | List, create and edit. Filter by material, total stock in grams, low-stock warning |
+| Impresoras (printers) | List, create and edit. Shows accumulated print hours and machine wear per print hour; logged print jobs add their hours |
+| Filamento (spools) | List, create and edit. Filter by material, total stock in grams, low-stock warning; logged print jobs take their grams off |
 | Calculadora (calculator) | Prices one or more pieces with the real cost breakdown, total and price per unit, live. Edits the workshop costs. Saves the calculation as a quote for a client |
 | Presupuestos (quotes) | List with status filter and totals. Quote page with the frozen lines and breakdown; mark sent, accept into orders, reject, print view for PDF, WhatsApp message. Client pages list their quotes; orders link back to their quote |
 | Inicio, Proyectos, Calendario, Servicio técnico | Placeholder screens |
@@ -26,7 +26,7 @@ You need Node.js 22 or newer. Nothing here touches a Cloudflare account: the dat
 ```bash
 npm install
 npm run db:migrate   # create the local D1 tables
-npm run db:seed      # load sample clients, quotes, orders, printers, spools and cost settings
+npm run db:seed      # load sample clients, quotes, orders, printers, spools, print jobs and cost settings
 npm run dev
 ```
 
@@ -47,10 +47,10 @@ One Cloudflare Worker serves both the React app and the API, and stores data in 
 | Folder | What lives there |
 |---|---|
 | `src/` | React 19 app (Vite, React Router). One folder per screen in `features/` (`orders/` is Pedidos, `clients/` Clientes, `printers/` Impresoras, `spools/` Filamento, `calculator/` Calculadora, `quotes/` Presupuestos and the quote print view), `shell/` the navigation, `ui/` pieces the screens share (API calls, form dialog, icons) |
-| `worker/` | The Worker: API under `/api/*`, everything else is the single-page app. One folder per module (`orders/`, `clients/`, `printers/`, `spools/`, `settings/`, `quotes/`) with its routes and a storage port with a D1 and an in-memory adapter (orders, clients and quotes share in-memory tables, `memory.ts`); `index.ts` tries each module in turn |
-| `shared/` | Rules used by both sides: order stages, validation and search; client validation, name matching, total spent, balance owed and contact links; printer validation, hours and wear cost; spool validation, low stock, material filter and stock totals; cost settings validation and defaults; the cost formula and spool shortages for the calculator; quote validation, status rules, the orders a quote becomes and its WhatsApp message |
+| `worker/` | The Worker: API under `/api/*`, everything else is the single-page app. One folder per module (`orders/`, `print-jobs/`, `clients/`, `printers/`, `spools/`, `settings/`, `quotes/`) with its routes and a storage port with a D1 and an in-memory adapter (the in-memory adapters share tables, `memory.ts`, where they read each other's rows); `index.ts` tries each module in turn |
+| `shared/` | Rules used by both sides: order stages, validation and search; client validation, name matching, total spent, balance owed and contact links; printer validation, hours and wear cost; spool validation, low stock, material filter and stock totals; cost settings validation and defaults; the cost formula and spool shortages for the calculator; quote validation, status rules, the orders a quote becomes and its WhatsApp message; print job validation and the real cost of an order |
 | `migrations/` | D1 schema, one file per change |
-| `seed/` | Sample clients, quotes, orders, printers, spools and cost settings, for local use only |
+| `seed/` | Sample clients, quotes, orders, printers, spools, print jobs and cost settings, for local use only |
 
 An order moves through five stages, in order:
 
@@ -60,19 +60,22 @@ An order moves through five stages, in order:
 
 | Method | Path | What it does |
 |---|---|---|
-| GET | `/api/orders` | List all orders. Each one has `client` (the client's name), `clientId` and `quoteId` (the quote it was accepted from, or null) |
+| GET | `/api/orders` | List all orders. Each one has `client` (the client's name), `clientId`, `quoteId` (the quote it was accepted from, or null), and `realCost` and `realProfit` (from its print jobs; null while it has none) |
 | POST | `/api/orders` | Create an order. It starts in `nuevo` and takes the next number, padded to four digits |
 | PUT | `/api/orders/:id/stage` | Move an order to another stage |
+| GET | `/api/orders/:id/jobs` | The order's print jobs, oldest first, and `cost`: its real cost term by term (null without jobs) |
+| POST | `/api/orders/:id/jobs` | Log a finished print job: store it, add its minutes to the printer and take its grams off each spool, in one atomic write. Answers the job and the order |
+| DELETE | `/api/orders/:id/jobs/:jobId` | Delete a logged job and give its minutes and grams back, in one atomic write. Answers the order |
 | GET | `/api/clients` | List clients, by name, each with `orderCount`, `totalSpent` and `balanceOwed` |
 | POST | `/api/clients` | Create a client |
 | GET | `/api/clients/:id` | One client with its totals, and its `orders` |
 | PUT | `/api/clients/:id` | Edit a client. Send only the fields to change; the rest keep their value |
 | GET | `/api/printers` | List printers, by name |
 | POST | `/api/printers` | Create a printer |
-| PUT | `/api/printers/:id` | Edit a printer. Send only the fields to change; the rest keep their value |
+| PUT | `/api/printers/:id` | Edit a printer. Send only the fields to change; only those are written, so minutes a print job adds meanwhile are kept |
 | GET | `/api/spools` | List filament spools, by material and colour |
 | POST | `/api/spools` | Create a spool |
-| PUT | `/api/spools/:id` | Edit a spool. Send only the fields to change; the rest keep their value |
+| PUT | `/api/spools/:id` | Edit a spool. Send only the fields to change; only those are written, so grams a print job takes meanwhile are kept |
 | GET | `/api/settings/costs` | The workshop cost settings (the defaults, with `updatedAt` null, until saved) |
 | PUT | `/api/settings/costs` | Edit the cost settings. Send only the fields to change; the rest keep their value |
 | GET | `/api/quotes` | List quotes, newest number first, each with `client` (the client's name). `?clientId=3` lists one client's |
@@ -153,12 +156,23 @@ curl -X POST http://localhost:5173/api/quotes/2/accept \
   -d '{"channel":"Instagram"}'
 ```
 
+A print job belongs to an order. Logging one needs `printerId`, `actualMinutes` (whole minutes, more than 0), `result` (`ok` or `fallida`) and `filaments`, one to 16 spools each with whole `grams` above 0 (`[{"spoolId":1,"grams":36}]`); `note` is optional. It answers 422 and changes nothing when the printer or a spool does not exist, when a spool appears twice, or when a spool has fewer grams left than the job used. The job, its grams per spool, the printer's minutes and every spool's grams are written in one D1 batch whose statements all repeat the same check, so two logs at the same time can never take a spool below 0 g. A job with result `ok` is stored as `terminada`, a failed one as `fallida`; the table also has `planeada`, `planned_start` and `estimated_minutes` for planning jobs on the calendar later. Deleting a job takes its minutes off the printer (not below 0) and gives its grams back to each spool (not above the net weight), also in one batch. Editing a printer or a spool writes only the fields sent, so an edit never overwrites the counters a job changed in between.
+
+The real cost of an order applies the calculator's material, energy, machine wear and fixed-cost terms to the actual minutes and grams of each of its jobs, failed ones included, with the current printers, spools and cost settings; jobs are rounded term by term and added up. It has no failure allowance, because failures are counted for real, and no labour or packaging, which are not known per job (the screen says so). Real profit is the order's price minus its real cost; it can be negative. The formula is `realCost` in `shared/print-jobs.ts`.
+
+```bash
+# Log 2 h 36 min on printer 1 for order 0142, with 36 g of spool 1 and 18 g of spool 2
+curl -X POST http://localhost:5173/api/orders/0142/jobs \
+  -H 'content-type: application/json' \
+  -d '{"printerId":1,"actualMinutes":156,"result":"ok","filaments":[{"spoolId":1,"grams":36},{"spoolId":2,"grams":18}]}'
+```
+
 Errors come back as JSON with an `error` message in Spanish, since the app shows them as they are.
 
 | Status | When |
 |---|---|
 | 400 | The body is not JSON (for an edit, not a JSON object) |
-| 404 | The order, client, printer, spool, quote or route does not exist |
+| 404 | The order, client, printer, spool, quote, print job or route does not exist |
 | 405 | The method is not allowed on that path |
 | 409 | The quote was already accepted, or is rejected, so it cannot be accepted or change status |
 | 422 | The data is missing or invalid (the answer adds `fields`, one message per field), or the stage does not exist |

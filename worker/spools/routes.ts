@@ -1,3 +1,4 @@
+import { sentFields } from '../../shared/fields';
 import { validateSpool } from '../../shared/spools';
 import { isJsonObject, json, problem, readJson } from '../http';
 import type { SpoolRepository } from './repository';
@@ -30,7 +31,8 @@ export async function handleSpools(request: Request, url: URL, repo: SpoolReposi
     // Fields left out of the body keep their stored value.
     const result = validateSpool({ ...current, ...body });
     if (!result.ok) return json({ error: INVALID, fields: result.errors }, 422);
-    const spool = await repo.update(id, result.value);
+    // Only the fields sent are written: a print job may have changed the counters since the read above.
+    const spool = await repo.update(id, sentFields(result.value, body));
     if (!spool) return problem(404, `No existe la bobina ${id}.`);
     return json({ spool });
   }

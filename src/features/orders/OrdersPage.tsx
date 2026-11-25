@@ -8,7 +8,7 @@ import { useOrders } from './useOrders';
 import './orders.css';
 
 export function OrdersPage() {
-  const { orders, status, error, lastChange, load, move, undo, create, dismissError, dismissChange } = useOrders();
+  const { orders, status, error, lastChange, load, move, undo, create, update, dismissError, dismissChange } = useOrders();
   const isPhone = useMediaQuery(PHONE_QUERY);
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<StageTab>('activos');
@@ -77,7 +77,10 @@ export function OrdersPage() {
         </div>
       )}
 
-      {selected && <OrderDetail order={selected} today={today} asSheet={isPhone} onMove={(to) => { void move(selected, to); if (isPhone) close(); }} onClose={close} />}
+      {selected && (
+        <OrderDetail order={selected} today={today} asSheet={isPhone} onMove={(to) => { void move(selected, to); if (isPhone) close(); }}
+          onOrderChange={update} onClose={close} />
+      )}
 
       {isPhone && !selected && (
         <button type="button" className="btn fab" aria-label="Nuevo pedido" onClick={() => setCreating(true)}><Icon name="plus" size={26} /></button>

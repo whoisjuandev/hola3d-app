@@ -31,6 +31,8 @@ export interface Order {
   note: string;
   createdAt: string;
   updatedAt: string;
+  realCost: number | null; // whole pesos, from the order's print jobs (failed ones included); null while it has none
+  realProfit: number | null; // price minus real cost; null while there is no real cost
 }
 
 /**

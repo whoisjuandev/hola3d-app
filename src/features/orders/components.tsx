@@ -8,6 +8,7 @@ import { ClientPicker } from '../clients/ClientPicker';
 import { clientReference, usePickerClients } from '../clients/picker';
 import { ApiError } from './api';
 import { depositLabel, dueLabel, isOverdue, money } from './format';
+import { PrintJobs } from './PrintJobs';
 
 const STAGE_COLOR: Record<Stage, { bg: string; fg: string }> = {
   nuevo: { bg: 'var(--sky)', fg: 'var(--ink)' },
@@ -80,8 +81,8 @@ export function StageTabs({ orders, value, onChange }: { orders: Order[]; value:
   );
 }
 
-export function OrderDetail({ order, today, asSheet, onMove, onClose }: {
-  order: Order; today: string; asSheet: boolean; onMove: (to: Stage) => void; onClose: () => void;
+export function OrderDetail({ order, today, asSheet, onMove, onOrderChange, onClose }: {
+  order: Order; today: string; asSheet: boolean; onMove: (to: Stage) => void; onOrderChange: (order: Order) => void; onClose: () => void;
 }) {
   const next = nextStage(order.stage);
   const prev = previousStage(order.stage);
@@ -133,6 +134,7 @@ export function OrderDetail({ order, today, asSheet, onMove, onClose }: {
           <div><dt>Seña</dt><dd className="detail__big">{depositLabel(order)}</dd></div>
         </dl>
         {order.note && <p className="detail__note">{order.note}</p>}
+        <PrintJobs key={order.id} order={order} onOrderChange={onOrderChange} />
       </aside>
     </>
   );

@@ -34,6 +34,10 @@ describe('API dispatch', () => {
     expect(await get('/api/quotes/1')).toEqual({ status: 404, body: { error: 'No existe el presupuesto 1.' } });
   });
 
+  it('sends print job paths to the print jobs module', async () => {
+    expect(await get('/api/orders/0142/jobs')).toEqual({ status: 404, body: { error: 'No existe el pedido #0142.' } });
+  });
+
   it('answers 404 when no module owns the path', async () => {
     expect(await get('/api/nada')).toEqual({ status: 404, body: { error: 'Esa ruta no existe.' } });
   });

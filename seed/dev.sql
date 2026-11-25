@@ -1,5 +1,7 @@
--- Sample clients, quotes, orders, printers, spools and cost settings for local development only (npm run db:seed). Never run against production.
--- Contact details are made up.
+-- Sample clients, quotes, orders, printers, spools, print jobs and cost settings for local development only (npm run db:seed).
+-- Never run against production. Contact details are made up.
+DELETE FROM print_job_filaments;
+DELETE FROM print_jobs;
 DELETE FROM orders;
 DELETE FROM quotes;
 DELETE FROM clients;
@@ -43,20 +45,43 @@ INSERT INTO orders (id, item, client, client_id, channel, stage, due_date, due_t
 -- Order 0142 is the accepted quote P-0001 (one line, at its frozen price).
 UPDATE orders SET quote_id = 1 WHERE id = '0142';
 
+-- Printer minutes and spool grams as they were before the print jobs below; the jobs then add and subtract theirs.
 INSERT INTO printers (id, name, model, purchase_price, lifetime_hours, power_watts, print_minutes, status, note, created_at, updated_at) VALUES
-(1, 'La A1', 'Bambu Lab A1 + AMS lite', 720000, 5000, 95, 74100, 'activa', 'La que más usamos. AMS para multicolor.', '2026-03-02T12:00:00Z', '2026-11-20T09:00:00Z'),
-(2, 'La Ender', 'Creality Ender 3 V3 SE', 320000, 3000, 110, 108450, 'en_servicio', 'Cambiando la boquilla, vuelve el lunes.', '2025-06-15T12:00:00Z', '2026-11-18T12:00:00Z'),
+(1, 'La A1', 'Bambu Lab A1 + AMS lite', 720000, 5000, 95, 73159, 'activa', 'La que más usamos. AMS para multicolor.', '2026-03-02T12:00:00Z', '2026-11-20T09:00:00Z'),
+(2, 'La Ender', 'Creality Ender 3 V3 SE', 320000, 3000, 110, 108270, 'en_servicio', 'Cambiando la boquilla, vuelve el lunes.', '2025-06-15T12:00:00Z', '2026-11-18T12:00:00Z'),
 (3, 'La vieja', 'Anet A8', 150000, 2000, 120, 121800, 'fuera_de_uso', 'Guardada para repuestos.', '2023-04-01T12:00:00Z', '2026-01-10T12:00:00Z');
 
 INSERT INTO spools (id, material, color_name, color_hex, brand, net_grams, remaining_grams, price, low_stock_grams, note, created_at, updated_at) VALUES
-(1, 'PLA', 'Blanco', '#ffffff', 'Grilon3', 1000, 640, 21000, 150, '', '2026-10-28T12:00:00Z', '2026-11-20T09:00:00Z'),
-(2, 'PLA', 'Amarillo', '#ffc42e', 'Grilon3', 1000, 310, 21000, 150, 'Para los llaveros de Café Nube.', '2026-10-28T12:00:00Z', '2026-11-20T09:00:00Z'),
-(3, 'PLA', 'Lavanda', '#b9a6e8', 'Printalot', 1000, 120, 23500, 150, 'Pedir otra antes de fin de mes.', '2026-09-14T12:00:00Z', '2026-11-19T12:00:00Z'),
-(4, 'PLA', 'Celeste', '#8dd3f7', 'Printalot', 1000, 455, 23500, 150, '', '2026-10-02T12:00:00Z', '2026-11-19T18:00:00Z'),
+(1, 'PLA', 'Blanco', '#ffffff', 'Grilon3', 1000, 761, 21000, 150, '', '2026-10-28T12:00:00Z', '2026-11-20T09:00:00Z'),
+(2, 'PLA', 'Amarillo', '#ffc42e', 'Grilon3', 1000, 363, 21000, 150, 'Para los llaveros de Café Nube.', '2026-10-28T12:00:00Z', '2026-11-20T09:00:00Z'),
+(3, 'PLA', 'Lavanda', '#b9a6e8', 'Printalot', 1000, 260, 23500, 150, 'Pedir otra antes de fin de mes.', '2026-09-14T12:00:00Z', '2026-11-19T12:00:00Z'),
+(4, 'PLA', 'Celeste', '#8dd3f7', 'Printalot', 1000, 550, 23500, 150, '', '2026-10-02T12:00:00Z', '2026-11-19T18:00:00Z'),
 (5, 'PLA', 'Negro mate', '#2b2b2b', 'Grilon3', 1000, 1000, 22500, 150, 'Sin abrir.', '2026-11-15T12:00:00Z', '2026-11-15T12:00:00Z'),
 (6, 'PLA', 'Dorado silk', '#d4a72c', 'Printalot', 500, 90, 16000, 100, 'Alcanza para un topper, no para dos.', '2026-08-30T12:00:00Z', '2026-11-12T12:00:00Z'),
 (7, 'PETG', 'Blanco', '#f4f4f4', 'Grilon3', 1000, 870, 24000, 200, 'Para las piezas de robótica.', '2026-11-12T12:00:00Z', '2026-11-18T12:00:00Z'),
 (8, 'TPU', 'Negro', '#1a1a1a', 'Grilon3', 500, 380, 19000, 100, 'Flexible. Imprimir lento.', '2026-07-21T12:00:00Z', '2026-10-05T12:00:00Z');
+
+-- Logged print jobs, one of them failed. Order 0142 has printed half of its keychains so far.
+INSERT INTO print_jobs (id, order_id, printer_id, status, planned_start, estimated_minutes, actual_minutes, result, note, created_at, updated_at) VALUES
+(1, '0140', 1, 'fallida', NULL, NULL, 95, 'fallida', 'Se despegó de la cama a la hora y media.', '2026-11-14T15:00:00Z', '2026-11-14T15:00:00Z'),
+(2, '0140', 1, 'terminada', NULL, NULL, 420, 'ok', 'Segundo intento, con brim.', '2026-11-15T10:00:00Z', '2026-11-15T10:00:00Z'),
+(3, '0141', 1, 'terminada', NULL, NULL, 270, 'ok', '', '2026-11-18T09:00:00Z', '2026-11-18T09:00:00Z'),
+(4, '0143', 2, 'terminada', NULL, NULL, 180, 'ok', '', '2026-11-17T12:00:00Z', '2026-11-17T12:00:00Z'),
+(5, '0142', 1, 'terminada', NULL, NULL, 156, 'ok', 'Primera tanda: 6 de 12.', '2026-11-20T09:00:00Z', '2026-11-20T09:00:00Z');
+
+INSERT INTO print_job_filaments (id, job_id, spool_id, grams) VALUES
+(1, 1, 1, 25),
+(2, 2, 1, 60),
+(3, 2, 2, 35),
+(4, 3, 3, 140),
+(5, 4, 4, 95),
+(6, 5, 1, 36),
+(7, 5, 2, 18);
+
+-- Apply the jobs to the counters, as logging them in the app does. After this: La A1 74100 min, La Ender 108450 min;
+-- Blanco 640 g, Amarillo 310 g, Lavanda 120 g, Celeste 455 g. The rows keep their updated_at.
+UPDATE printers SET print_minutes = print_minutes + (SELECT COALESCE(SUM(actual_minutes), 0) FROM print_jobs WHERE printer_id = printers.id AND status != 'planeada');
+UPDATE spools SET remaining_grams = remaining_grams - (SELECT COALESCE(SUM(grams), 0) FROM print_job_filaments WHERE spool_id = spools.id);
 
 -- The single cost settings row (the migration creates it with defaults; these are the sample shop's numbers).
 INSERT OR REPLACE INTO cost_settings (id, kwh_price, labour_per_hour, failure_percent, margin_percent, monthly_fixed_costs, monthly_print_hours, packaging_cost, rounding_step, commission_percent, updated_at) VALUES

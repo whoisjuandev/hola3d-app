@@ -1,11 +1,13 @@
 import type { Spool, SpoolInput } from '../../shared/spools';
+import type { MemoryTables } from '../memory';
 
 /** Port: what the spool routes need from storage. */
 export interface SpoolRepository {
   list(): Promise<Spool[]>;
   get(id: number): Promise<Spool | null>;
   create(input: SpoolInput): Promise<Spool>;
-  update(id: number, input: SpoolInput): Promise<Spool | null>;
+  /** Writes only the fields in `changes`, so it never overwrites grams a print job took meanwhile. */
+  update(id: number, changes: Partial<SpoolInput>): Promise<Spool | null>;
 }
 
 interface SpoolRow {
@@ -40,6 +42,11 @@ function toSpool(row: SpoolRow): Spool {
   };
 }
 
+const COLUMNS: Record<keyof SpoolInput, string> = {
+  material: 'material', colorName: 'color_name', colorHex: 'color_hex', brand: 'brand', netGrams: 'net_grams',
+  remainingGrams: 'remaining_grams', price: 'price', lowStockGrams: 'low_stock_grams', note: 'note',
+};
+
 /** Adapter: D1 storage. Spools sort by material, then colour. */
 export function d1SpoolRepository(db: D1Database): SpoolRepository {
   return {
@@ -67,23 +74,20 @@ export function d1SpoolRepository(db: D1Database): SpoolRepository {
       return toSpool(row);
     },
 
-    async update(id, input) {
+    async update(id, changes) {
+      const keys = (Object.keys(changes) as (keyof SpoolInput)[]).filter((k) => k in COLUMNS);
       const row = await db
-        .prepare(
-          `UPDATE spools SET material = ?, color_name = ?, color_hex = ?, brand = ?, net_grams = ?, remaining_grams = ?, price = ?, low_stock_grams = ?, note = ?, updated_at = ?
-           WHERE id = ?
-           RETURNING *`,
-        )
-        .bind(input.material, input.colorName, input.colorHex, input.brand, input.netGrams, input.remainingGrams, input.price, input.lowStockGrams, input.note, new Date().toISOString(), id)
+        .prepare(`UPDATE spools SET ${keys.map((k) => `${COLUMNS[k]} = ?, `).join('')}updated_at = ? WHERE id = ? RETURNING *`)
+        .bind(...keys.map((k) => changes[k]), new Date().toISOString(), id)
         .first<SpoolRow>();
       return row ? toSpool(row) : null;
     },
   };
 }
 
-/** Adapter: in-memory storage for tests. */
-export function memorySpoolRepository(seed: Spool[] = []): SpoolRepository {
-  const spools = new Map(seed.map((s) => [s.id, { ...s }]));
+/** Adapter: in-memory storage for tests. With tables, it shares them with the in-memory print job repository. */
+export function memorySpoolRepository(source: Spool[] | MemoryTables = []): SpoolRepository {
+  const spools = Array.isArray(source) ? new Map(source.map((s) => [s.id, { ...s }])) : source.spools;
   return {
     async list() {
       return [...spools.values()];
@@ -98,10 +102,10 @@ export function memorySpoolRepository(seed: Spool[] = []): SpoolRepository {
       spools.set(id, spool);
       return spool;
     },
-    async update(id, input) {
+    async update(id, changes) {
       const current = spools.get(id);
       if (!current) return null;
-      const updated: Spool = { ...current, ...input, updatedAt: new Date().toISOString() };
+      const updated: Spool = { ...current, ...changes, updatedAt: new Date().toISOString() };
       spools.set(id, updated);
       return updated;
     },
