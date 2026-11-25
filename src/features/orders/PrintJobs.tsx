@@ -15,7 +15,7 @@ import { grams } from '../spools/format';
 import { dayTitle, timeRange } from '../calendar/format';
 import { PlanJobDialog, type PlannedJobRef } from '../calendar/PlanJobDialog';
 import { addMinutes } from '../../../shared/calendar';
-import { ApiError, deletePrintJob, fetchPrintJobs, finishPrintJob, logPrintJob } from './api';
+import { ApiError, deletePlannedJob, deletePrintJob, fetchPrintJobs, finishPrintJob, logPrintJob } from './api';
 import { money } from './format';
 import { emptyJobDraft, finishDraft, jobRequest, type JobDraft } from './job-form';
 
@@ -68,10 +68,11 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
     return () => { alive = false; };
   }, [order.id]);
 
-  async function remove(jobId: number) {
+  async function remove(job: PrintJob) {
     setBusy(true);
     try {
-      onOrderChange(await deletePrintJob(order.id, jobId));
+      // A planned job is deleted as a plan, which refuses (409) once it has been finished meanwhile.
+      onOrderChange(await (job.status === 'planeada' ? deletePlannedJob(order.id, job.id) : deletePrintJob(order.id, job.id)));
       setConfirming(null);
       await load();
     } catch (e) {
@@ -139,7 +140,7 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
                       : `¿La borramos? Vuelven ${job.actualMinutes === null ? '' : `${durationLabel(job.actualMinutes)} a la impresora y `}los gramos a cada bobina.`}
                   </span>
                   <span className="job__confirm-actions">
-                    <button type="button" className="btn btn--sm" disabled={busy} onClick={() => void remove(job.id)}>Sí, borrar</button>
+                    <button type="button" className="btn btn--sm" disabled={busy} onClick={() => void remove(job)}>Sí, borrar</button>
                     <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => setConfirming(null)}>No</button>
                   </span>
                 </div>

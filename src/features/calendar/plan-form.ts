@@ -26,6 +26,15 @@ export function planDraft(
   };
 }
 
+/**
+ * The body of an edit: only the fields whose request value differs from the one the form started from, so an edit
+ * never writes back a value another request changed meanwhile. Empty when nothing changed.
+ */
+export function planChanges(draft: PlanDraft, initial: PlanDraft): Record<string, unknown> {
+  const before = planRequest(initial);
+  return Object.fromEntries(Object.entries(planRequest(draft)).filter(([key, value]) => value !== before[key]));
+}
+
 /** The body of a plan or edit request. A missing date or time goes as null for the API to name. */
 export function planRequest(draft: PlanDraft): Record<string, unknown> {
   return {

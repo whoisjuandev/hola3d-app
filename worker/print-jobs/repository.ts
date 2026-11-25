@@ -33,17 +33,25 @@ export interface PrintJobRepository {
    * written nothing.
    */
   plan(orderId: string, plan: PlannedJobInput): Promise<PrintJob | null>;
-  /** Rewrite a planned job of the order, under the same conditions as `plan` (its own old span aside). Null otherwise. */
-  updatePlan(orderId: string, jobId: number, plan: PlannedJobInput): Promise<PrintJob | null>;
-  /** Delete a planned job of the order. It took nothing, so nothing is given back. False when there is no such job. */
+  /**
+   * In one statement, write only the fields in `changes` to a planned job of the order; the others keep the value the
+   * row has when the statement runs. Under the same conditions as `plan`, checked in that statement on the printer and
+   * span the job will have after the write (its own old span aside). Null otherwise, having written nothing.
+   */
+  updatePlan(orderId: string, jobId: number, changes: Partial<PlannedJobInput>): Promise<PrintJob | null>;
+  /**
+   * Delete a job of the order only while it is planned. It took nothing, so nothing is given back. False when there is
+   * no such job or it has been finished.
+   */
   removePlanned(orderId: string, jobId: number): Promise<boolean>;
   /**
    * In one atomic write, as `log` does for a new job: turn a planned job of the order into a finished one with its
-   * cost, store its grams per spool, add its minutes to the printer and take its grams off each spool. Only while the job
-   * is still planned and the order, the printer and every spool exist and every spool has enough grams left; otherwise
+   * cost, store its grams per spool, add its minutes to the printer (`job.printerId`, which may differ from the planned
+   * one) and take its grams off each spool. Only while the job is still planned on `plannedPrinterId` (the printer the
+   * caller read) and the order, the printer and every spool exist and every spool has enough grams left; otherwise
    * returns null having written nothing. The plan (start and estimate) stays with the job.
    */
-  finish(orderId: string, jobId: number, job: NewPrintJob, cost: JobCost): Promise<PrintJob | null>;
+  finish(orderId: string, jobId: number, plannedPrinterId: number, job: NewPrintJob, cost: JobCost): Promise<PrintJob | null>;
 }
 
 interface PrintJobRow {
@@ -138,6 +146,9 @@ function freeSpan(printerId: number, start: string, end: string, exceptId: numbe
 }
 
 const ACTIVE_PRINTER = "EXISTS (SELECT 1 FROM printers WHERE id = ? AND status = 'activa')";
+
+const PLAN_COLUMNS = { printerId: 'printer_id', plannedStart: 'planned_start', estimatedMinutes: 'estimated_minutes', note: 'note' } as const;
+const PLAN_KEYS = Object.keys(PLAN_COLUMNS) as (keyof PlannedJobInput)[];
 
 interface CostRow extends CostColumns {
   order_id: string;
@@ -289,15 +300,30 @@ export function d1PrintJobRepository(db: D1Database): PrintJobRepository {
       return row ? getJob(row.id) : null;
     },
 
-    async updatePlan(orderId, jobId, plan) {
-      const free = freeSpan(plan.printerId, plan.plannedStart, addMinutes(plan.plannedStart, plan.estimatedMinutes), jobId);
+    async updatePlan(orderId, jobId, changes) {
+      const sent = PLAN_KEYS.filter((k) => changes[k] !== undefined);
+      // The values the row will have after the write: the sent one, or (bound as NULL) the row's own at that moment.
+      const printer = changes.printerId ?? null;
+      const start = changes.plannedStart ?? null;
+      const minutes = changes.estimatedMinutes ?? null;
+      const after = {
+        printer: 'COALESCE(?, print_jobs.printer_id)',
+        start: 'COALESCE(?, print_jobs.planned_start)',
+        end: "strftime('%Y-%m-%dT%H:%M', COALESCE(?, print_jobs.planned_start), '+' || COALESCE(?, print_jobs.estimated_minutes) || ' minutes')",
+      };
+      // One statement: the checks read the row as it is when it runs, so no other write can slip between them and the write.
+      // As `freeSpan`, with the job's span after the write.
       const row = await db
         .prepare(
-          `UPDATE print_jobs SET printer_id = ?, planned_start = ?, estimated_minutes = ?, note = ?, updated_at = ?
-           WHERE id = ? AND order_id = ? AND status = 'planeada' AND ${ACTIVE_PRINTER} AND ${free.sql}
+          `UPDATE print_jobs SET ${sent.map((k) => `${PLAN_COLUMNS[k]} = ?, `).join('')}updated_at = ?
+           WHERE id = ? AND order_id = ? AND status = 'planeada'
+             AND EXISTS (SELECT 1 FROM printers WHERE id = ${after.printer} AND status = 'activa')
+             AND NOT EXISTS (SELECT 1 FROM print_jobs other WHERE other.printer_id = ${after.printer} AND other.status = 'planeada'
+               AND other.id != print_jobs.id AND other.planned_start < ${after.end}
+               AND strftime('%Y-%m-%dT%H:%M', other.planned_start, '+' || other.estimated_minutes || ' minutes') > ${after.start})
            RETURNING id`,
         )
-        .bind(plan.printerId, plan.plannedStart, plan.estimatedMinutes, plan.note, new Date().toISOString(), jobId, orderId, plan.printerId, ...free.params)
+        .bind(...sent.map((k) => changes[k]), new Date().toISOString(), jobId, orderId, printer, printer, start, minutes, start)
         .first<{ id: number }>();
       return row ? getJob(row.id) : null;
     },
@@ -310,47 +336,50 @@ export function d1PrintJobRepository(db: D1Database): PrintJobRepository {
       return row !== null;
     },
 
-    async finish(orderId, jobId, job, cost) {
+    async finish(orderId, jobId, plannedPrinterId, job, cost) {
       const now = new Date().toISOString();
-      // The guard of `log`, plus: the job is still a planned job of this order. The statements that move the counters
-      // run while the job is still planned and repeat it; the spool update is the last one that reads the grams and its
-      // guard is evaluated once, before any row changes, as in `log`. The job's own update comes last: it changes the
-      // status the guard reads, so it checks instead that this batch stored the job's grams (a planned job has none),
-      // which happened only if the guard held. D1 runs a batch as one transaction: everything is written or nothing.
+      // A value made for this request only: the job carries it once this batch's first statement has applied.
+      const token = crypto.randomUUID();
+      // First statement: the job becomes finished with its frozen cost and the token, only while it is still a planned
+      // job of this order on the printer the caller read, and under the guard of `log` (order, printer and spools exist,
+      // each spool has enough grams). Every later statement runs only while the job carries this token, so if the first
+      // one did not apply, none does. D1 runs a batch as one transaction: everything is written or nothing.
       const guard = [
-        "EXISTS (SELECT 1 FROM print_jobs WHERE id = ? AND order_id = ? AND status = 'planeada')",
         'EXISTS (SELECT 1 FROM orders WHERE id = ?)',
         'EXISTS (SELECT 1 FROM printers WHERE id = ?)',
         ...job.filaments.map(() => 'EXISTS (SELECT 1 FROM spools WHERE id = ? AND remaining_grams >= ?)'),
       ].join(' AND ');
-      const guardParams = [jobId, orderId, orderId, job.printerId, ...job.filaments.flatMap((f) => [f.spoolId, f.grams])];
+      const guardParams = [orderId, job.printerId, ...job.filaments.flatMap((f) => [f.spoolId, f.grams])];
+      const finished = 'EXISTS (SELECT 1 FROM print_jobs WHERE id = ? AND finish_token = ?)';
 
       const results = await db.batch<{ id: number }>([
-        ...job.filaments.map((f) =>
-          db.prepare(`INSERT INTO print_job_filaments (job_id, spool_id, grams) SELECT ?, ?, ? WHERE ${guard}`).bind(jobId, f.spoolId, f.grams, ...guardParams),
-        ),
-        db
-          .prepare(`UPDATE printers SET print_minutes = print_minutes + ?, updated_at = ? WHERE id = ? AND ${guard}`)
-          .bind(job.actualMinutes, now, job.printerId, ...guardParams),
-        db
-          .prepare(
-            `UPDATE spools SET remaining_grams = remaining_grams - CASE id ${job.filaments.map(() => 'WHEN ? THEN ?').join(' ')} END, updated_at = ?
-             WHERE id IN (${job.filaments.map(() => '?').join(', ')}) AND ${guard}`,
-          )
-          .bind(...job.filaments.flatMap((f) => [f.spoolId, f.grams]), now, ...job.filaments.map((f) => f.spoolId), ...guardParams),
         db
           .prepare(
             `UPDATE print_jobs SET printer_id = ?, status = ?, actual_minutes = ?, result = ?, labour_minutes = ?, extra_cost = ?,
-               cost_material = ?, cost_energy = ?, cost_machine_wear = ?, cost_fixed = ?, cost_labour = ?, cost_extra = ?, note = ?, updated_at = ?
-             WHERE id = ? AND order_id = ? AND status = 'planeada' AND EXISTS (SELECT 1 FROM print_job_filaments WHERE job_id = print_jobs.id)
+               cost_material = ?, cost_energy = ?, cost_machine_wear = ?, cost_fixed = ?, cost_labour = ?, cost_extra = ?, note = ?,
+               finish_token = ?, updated_at = ?
+             WHERE id = ? AND order_id = ? AND status = 'planeada' AND printer_id = ? AND ${guard}
              RETURNING id`,
           )
           .bind(
             job.printerId, statusForResult(job.result), job.actualMinutes, job.result, job.labourMinutes, job.extraCost,
-            cost.material, cost.energy, cost.machineWear, cost.fixedCosts, cost.labour, cost.extra, job.note, now, jobId, orderId,
+            cost.material, cost.energy, cost.machineWear, cost.fixedCosts, cost.labour, cost.extra, job.note, token, now,
+            jobId, orderId, plannedPrinterId, ...guardParams,
           ),
+        ...job.filaments.map((f) =>
+          db.prepare(`INSERT INTO print_job_filaments (job_id, spool_id, grams) SELECT ?, ?, ? WHERE ${finished}`).bind(jobId, f.spoolId, f.grams, jobId, token),
+        ),
+        db
+          .prepare(`UPDATE printers SET print_minutes = print_minutes + ?, updated_at = ? WHERE id = ? AND ${finished}`)
+          .bind(job.actualMinutes, now, job.printerId, jobId, token),
+        db
+          .prepare(
+            `UPDATE spools SET remaining_grams = remaining_grams - CASE id ${job.filaments.map(() => 'WHEN ? THEN ?').join(' ')} END, updated_at = ?
+             WHERE id IN (${job.filaments.map(() => '?').join(', ')}) AND ${finished}`,
+          )
+          .bind(...job.filaments.flatMap((f) => [f.spoolId, f.grams]), now, ...job.filaments.map((f) => f.spoolId), jobId, token),
       ]);
-      if (results.at(-1)?.results[0]?.id === undefined) return null;
+      if (results[0]?.results[0]?.id === undefined) return null;
       return getJob(jobId);
     },
   };
@@ -440,11 +469,15 @@ export function memoryPrintJobRepository(tables: MemoryTables): PrintJobReposito
       printJobs.set(stored.id, stored);
       return view(stored);
     },
-    async updatePlan(orderId, jobId, plan) {
+    async updatePlan(orderId, jobId, changes) {
+      // No await in here, so the checks see the row the write changes, as the single D1 statement does.
       const current = printJobs.get(jobId);
       if (!current || current.orderId !== orderId || current.status !== 'planeada') return null;
-      if (printers.get(plan.printerId)?.status !== 'activa' || overlappingJob(plan, [...printJobs.values()], jobId)) return null;
-      const updated: StoredPrintJob = { ...current, ...plan, updatedAt: new Date().toISOString() };
+      const sent = Object.fromEntries(PLAN_KEYS.filter((k) => changes[k] !== undefined).map((k) => [k, changes[k]])) as Partial<PlannedJobInput>;
+      const after = { ...current, ...sent };
+      const span = { printerId: after.printerId, plannedStart: after.plannedStart ?? '', estimatedMinutes: after.estimatedMinutes ?? 0 };
+      if (printers.get(after.printerId)?.status !== 'activa' || overlappingJob(span, [...printJobs.values()], jobId)) return null;
+      const updated: StoredPrintJob = { ...after, updatedAt: new Date().toISOString() };
       printJobs.set(jobId, updated);
       return view(updated);
     },
@@ -454,12 +487,13 @@ export function memoryPrintJobRepository(tables: MemoryTables): PrintJobReposito
       printJobs.delete(jobId);
       return true;
     },
-    async finish(orderId, jobId, job, cost) {
+    async finish(orderId, jobId, plannedPrinterId, job, cost) {
       // No await in here, so nothing can run between the checks and the writes.
       const current = printJobs.get(jobId);
       const printer = printers.get(job.printerId);
       const enough = job.filaments.every((f) => (spools.get(f.spoolId)?.remainingGrams ?? -1) >= f.grams);
-      if (!current || current.orderId !== orderId || current.status !== 'planeada' || !tables.orders.has(orderId) || !printer || !enough) return null;
+      const stillPlanned = current?.orderId === orderId && current.status === 'planeada' && current.printerId === plannedPrinterId;
+      if (!current || !stillPlanned || !tables.orders.has(orderId) || !printer || !enough) return null;
       const now = new Date().toISOString();
       const finished: StoredPrintJob = {
         ...current, printerId: job.printerId, status: statusForResult(job.result), result: job.result, actualMinutes: job.actualMinutes,

@@ -54,8 +54,14 @@ const plannedView: PrintJob = { ...planned, printer: 'La A1', filaments: [] };
 
 const INVALID = 'Revisá los datos de la impresión.';
 
-function setup(options: { spools?: (repo: SpoolRepository) => SpoolRepository; jobs?: (repo: PrintJobRepository) => PrintJobRepository } = {}) {
-  const tables = memoryTables([cafe], [keychains, pot], [], { printers: [a1, ender, p1s], spools: [white, yellow], printJobs: [logged, planned] });
+function setup(options: {
+  spools?: (repo: SpoolRepository) => SpoolRepository;
+  jobs?: (repo: PrintJobRepository) => PrintJobRepository;
+  printJobs?: StoredPrintJob[];
+} = {}) {
+  const tables = memoryTables([cafe], [keychains, pot], [], {
+    printers: [a1, ender, p1s], spools: [white, yellow], printJobs: options.printJobs ?? [logged, planned],
+  });
   const printers = memoryPrinterRepository(tables);
   const spoolRepo = memorySpoolRepository(tables);
   const jobRepo = memoryPrintJobRepository(tables);
@@ -87,6 +93,23 @@ function setup(options: { spools?: (repo: SpoolRepository) => SpoolRepository; j
 
 const plan = { printerId: 1, plannedStart: '2026-11-25T14:00', estimatedMinutes: 160, note: 'Segunda tanda' };
 const anyStamp = expect.any(String) as unknown as string;
+
+/**
+ * Wraps the job repository so that the route's next read of a job answers `view`: as if that request read the job just
+ * before another request changed it. Later reads see the stored job.
+ */
+function staleJob() {
+  let next: PrintJob | null = null;
+  const wrap = (repo: PrintJobRepository): PrintJobRepository => ({
+    ...repo,
+    get: async (jobId) => {
+      const view = next;
+      next = null;
+      return view && view.id === jobId ? structuredClone(view) : repo.get(jobId);
+    },
+  });
+  return { wrap, readNext: (view: PrintJob) => { next = view; } };
+}
 
 describe('POST /api/orders/:id/jobs/plan', () => {
   it('plans a job on an active printer and changes no counter or cost', async () => {
@@ -225,6 +248,31 @@ describe('PUT /api/orders/:id/jobs/:jobId', () => {
     await expectRejected({ estimatedMinutes: -5 }, { estimatedMinutes: 'Poné cuánto va a tardar: más de 0 minutos.' });
   });
 
+  it('writes only the fields it sent: an edit that read the job before a move does not undo the move', async () => {
+    const stale = staleJob();
+    const { call } = setup({ jobs: stale.wrap });
+    expect((await call('PUT', '/api/orders/0143/jobs/2', { printerId: 3 })).status).toBe(200);
+    stale.readNext(plannedView); // this edit read the job while it was still on La A1
+    const { status, body } = await call('PUT', '/api/orders/0143/jobs/2', { estimatedMinutes: 300 });
+    expect(status).toBe(200);
+    const job = { ...plannedView, printerId: 3, printer: 'La P1S', estimatedMinutes: 300, updatedAt: anyStamp };
+    expect(body).toEqual({ job });
+    expect((await call('GET', '/api/orders/0143/jobs')).body).toEqual({ jobs: [job], cost: null });
+  });
+
+  it('checks the overlap on the printer and span the job will have after the write, not on an earlier read, and changes nothing', async () => {
+    const stale = staleJob();
+    const { call, snapshot } = setup({ jobs: stale.wrap });
+    expect((await call('POST', '/api/orders/0142/jobs/plan', { ...plan, printerId: 3, plannedStart: '2026-11-26T19:00', estimatedMinutes: 60 })).status).toBe(201);
+    expect((await call('PUT', '/api/orders/0143/jobs/2', { printerId: 3 })).status).toBe(200); // 09:00 to 17:00 on La P1S
+    const before = await snapshot();
+    stale.readNext(plannedView); // on La A1 the longer span would be free; on La P1S it reaches job 3
+    expect(await call('PUT', '/api/orders/0143/jobs/2', { estimatedMinutes: 660 })).toEqual({
+      status: 422, body: { error: INVALID, fields: { plannedStart: 'La P1S ya tiene planeada la impresión del pedido #0142 del 26/11 19:00 al 26/11 20:00.' } },
+    });
+    expect(await snapshot()).toEqual(before);
+  });
+
   it('answers 404 for a job of another order, and 409 for a finished job, changing nothing', async () => {
     const { call, snapshot } = setup();
     const before = await snapshot();
@@ -236,15 +284,79 @@ describe('PUT /api/orders/:id/jobs/:jobId', () => {
   });
 });
 
-describe('DELETE a planned job', () => {
-  it('deletes it and gives nothing back, because it took nothing', async () => {
+const finishBody = { printerId: 1, actualMinutes: 90, result: 'ok', note: 'Salió', filaments: [{ spoolId: 1, grams: 30 }, { spoolId: 2, grams: 30 }] };
+
+describe('DELETE /api/orders/:id/jobs/:jobId/plan', () => {
+  it('deletes a planned job and gives nothing back, because it took nothing', async () => {
     const { call, snapshot } = setup();
     const before = await snapshot();
-    const { status, body } = await call('DELETE', '/api/orders/0143/jobs/2');
+    const { status, body } = await call('DELETE', '/api/orders/0143/jobs/2/plan');
     expect(status).toBe(200);
     expect(body).toEqual({ order: pot });
     expect(await snapshot()).toEqual({ ...before, otherJobs: { jobs: [], cost: null } });
-    expect(await call('DELETE', '/api/orders/0143/jobs/2')).toEqual({ status: 404, body: { error: 'El pedido #0143 no tiene la impresión 2.' } });
+    expect(await call('DELETE', '/api/orders/0143/jobs/2/plan')).toEqual({ status: 404, body: { error: 'El pedido #0143 no tiene la impresión 2.' } });
+  });
+
+  it('refuses with 409 a job finished meanwhile, keeping it and its counters', async () => {
+    const { call, snapshot } = setup();
+    expect((await call('POST', '/api/orders/0143/jobs/2/finish', finishBody)).status).toBe(200);
+    const after = await snapshot();
+    expect(await call('DELETE', '/api/orders/0143/jobs/2/plan')).toEqual({
+      status: 409, body: { error: 'La impresión 2 ya se cargó como terminada: no se borró.' },
+    });
+    expect(await call('DELETE', '/api/orders/0142/jobs/1/plan')).toEqual({
+      status: 409, body: { error: 'La impresión 1 ya se cargó como terminada: no se borró.' },
+    });
+    expect(await snapshot()).toEqual(after);
+    expect(after.printMinutes).toEqual([[1, 7290], [2, 108450], [3, 600]]);
+  });
+
+  it('answers 404 for a job of another order or an order that does not exist, changing nothing', async () => {
+    const { call, snapshot } = setup();
+    const before = await snapshot();
+    expect(await call('DELETE', '/api/orders/0142/jobs/2/plan')).toEqual({ status: 404, body: { error: 'El pedido #0142 no tiene la impresión 2.' } });
+    expect(await call('DELETE', '/api/orders/0999/jobs/2/plan')).toEqual({ status: 404, body: { error: 'No existe el pedido #0999.' } });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('rejects other methods', async () => {
+    const { call } = setup();
+    expect(await call('POST', '/api/orders/0143/jobs/2/plan')).toEqual({ status: 405, body: { error: 'Método no permitido.' } });
+  });
+});
+
+describe('DELETE /api/orders/:id/jobs/:jobId on a planned job', () => {
+  it('answers 409 and keeps the planned job', async () => {
+    const { call, snapshot } = setup();
+    const before = await snapshot();
+    expect(await call('DELETE', '/api/orders/0143/jobs/2')).toEqual({
+      status: 409, body: { error: 'La impresión 2 está planeada: se borra como plan.' },
+    });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('answers 409, not 404, when the job is finished between the check and the answer', async () => {
+    let landFinish: (() => Promise<unknown>) | null = null;
+    const racing = (repo: PrintJobRepository): PrintJobRepository => ({
+      ...repo,
+      remove: async (orderId, jobId) => {
+        const removed = await repo.remove(orderId, jobId);
+        const land = landFinish;
+        landFinish = null;
+        if (land) await land();
+        return removed;
+      },
+    });
+    const { call, snapshot } = setup({ jobs: racing });
+    landFinish = () => call('POST', '/api/orders/0143/jobs/2/finish', finishBody);
+    expect(await call('DELETE', '/api/orders/0143/jobs/2')).toEqual({
+      status: 409, body: { error: 'La impresión 2 cambió mientras la borrabas: revisá y probá de nuevo.' },
+    });
+    // The finish stands: the job is finished and its minutes and grams stay counted.
+    expect(await snapshot()).toMatchObject({
+      printMinutes: [[1, 7290], [2, 108450], [3, 600]], grams: [[1, 610], [2, 0]],
+      otherJobs: { jobs: [{ id: 2, status: 'terminada' }] },
+    });
   });
 });
 
@@ -292,6 +404,42 @@ describe('POST /api/orders/:id/jobs/:jobId/finish', () => {
     const second = setup();
     expect((await second.call('POST', '/api/orders/0143/jobs/2/finish', { ...finish, printerId: 3 })).body.job).toMatchObject({ printerId: 3, printer: 'La P1S' });
     expect((await second.snapshot()).printMinutes).toEqual([[1, 7200], [2, 108450], [3, 690]]);
+  });
+
+  it('finishes on the printer the job has now: after a move it charges the new printer or answers 409, never the old one', async () => {
+    const { printerId: _p, ...noPrinter } = finish;
+    const stale = staleJob();
+    const { call, snapshot } = setup({ jobs: stale.wrap });
+    expect((await call('PUT', '/api/orders/0143/jobs/2', { printerId: 3 })).status).toBe(200);
+    const moved = await snapshot();
+    stale.readNext(plannedView); // this finish read the job while it was still on La A1
+    expect(await call('POST', '/api/orders/0143/jobs/2/finish', noPrinter)).toEqual({
+      status: 409, body: { error: 'La impresión 2 cambió de impresora mientras la terminabas: revisá y probá de nuevo.' },
+    });
+    expect(await snapshot()).toEqual(moved);
+    // Read now, it takes the printer the job has: La P1S.
+    expect((await call('POST', '/api/orders/0143/jobs/2/finish', noPrinter)).body.job).toMatchObject({ printerId: 3, printer: 'La P1S', status: 'terminada' });
+    expect((await snapshot()).printMinutes).toEqual([[1, 7200], [2, 108450], [3, 690]]);
+  });
+
+  it('does not finish a planned job that already has a grams row unless its own write applied', async () => {
+    // A planned job carrying a grams row (as a hand-edited database could), moved to La P1S after the route read it.
+    const withGrams: StoredPrintJob = { ...planned, filaments: [{ spoolId: 1, grams: 5 }] };
+    const stale = staleJob();
+    const { call, snapshot } = setup({ jobs: stale.wrap, printJobs: [logged, withGrams] });
+    expect((await call('PUT', '/api/orders/0143/jobs/2', { printerId: 3 })).status).toBe(200);
+    const before = await snapshot();
+    stale.readNext({ ...plannedView, filaments: [{ spoolId: 1, spool: 'PLA Blanco · Grilon3', colorHex: '#ffffff', grams: 5 }] });
+    const { printerId: _p, ...noPrinter } = finish;
+    expect((await call('POST', '/api/orders/0143/jobs/2/finish', noPrinter)).status).toBe(409);
+    expect(await snapshot()).toEqual(before);
+    expect((before.otherJobs.jobs as PrintJob[])[0]).toMatchObject({ status: 'planeada', printerId: 3, filaments: [{ spoolId: 1, grams: 5 }] });
+  });
+
+  it('still charges a printer the body names over the planned one', async () => {
+    const { call, snapshot } = setup();
+    expect((await call('POST', '/api/orders/0143/jobs/2/finish', { ...finish, printerId: 2 })).body.job).toMatchObject({ printerId: 2, printer: 'La Ender' });
+    expect((await snapshot()).printMinutes).toEqual([[1, 7200], [2, 108540], [3, 600]]);
   });
 
   it('stores a failed result as fallida and still counts it', async () => {

@@ -10,9 +10,9 @@ import { Icon } from '../../ui/Icon';
 import '../../ui/form-dialog.css';
 import '../orders/orders.css';
 import './calendar.css';
-import { deletePrintJob, fetchOrders, planPrintJob, updatePlannedJob } from '../orders/api';
+import { deletePlannedJob, fetchOrders, planPrintJob, updatePlannedJob } from '../orders/api';
 import { fetchPrinters } from '../printers/api';
-import { planDraft, planRequest, type PlanDraft } from './plan-form';
+import { planChanges, planDraft, planRequest, type PlanDraft } from './plan-form';
 
 export type PlannedJobRef = Pick<PrintJob, 'id' | 'orderId' | 'printerId' | 'plannedStart' | 'estimatedMinutes' | 'note'>;
 
@@ -30,7 +30,8 @@ export function PlanJobDialog({ job, order, defaults, orderLink = false, onSaved
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const uid = useId();
-  const [draft, setDraft] = useState<PlanDraft>(() => planDraft(job, { orderId: order?.id, ...defaults }));
+  const [initial] = useState<PlanDraft>(() => planDraft(job, { orderId: order?.id, ...defaults }));
+  const [draft, setDraft] = useState<PlanDraft>(initial);
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -72,10 +73,14 @@ export function PlanJobDialog({ job, order, defaults, orderLink = false, onSaved
       setBanner('Revisá los datos de la impresión.');
       return;
     }
+    if (job && Object.keys(planChanges(draft, initial)).length === 0) {
+      onClose();
+      return;
+    }
     setSaving(true);
     try {
-      const body = planRequest(draft);
-      onSaved(job ? await updatePlannedJob(job.orderId, job.id, body) : await planPrintJob(draft.orderId, body));
+      // An edit sends only what changed here, so it never undoes a change another request made to the other fields.
+      onSaved(job ? await updatePlannedJob(job.orderId, job.id, planChanges(draft, initial)) : await planPrintJob(draft.orderId, planRequest(draft)));
       onClose();
     } catch (err) {
       const apiErr = err as ApiError;
@@ -89,7 +94,8 @@ export function PlanJobDialog({ job, order, defaults, orderLink = false, onSaved
     if (!job) return;
     setSaving(true);
     try {
-      const saved = await deletePrintJob(job.orderId, job.id);
+      // Deletes it only while it is still planned: a job finished meanwhile keeps its counters (409).
+      const saved = await deletePlannedJob(job.orderId, job.id);
       onDeleted?.(saved);
       onClose();
     } catch (err) {

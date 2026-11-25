@@ -28,7 +28,12 @@ export async function logPrintJob(orderId: string, input: Record<string, unknown
   return request<{ job: PrintJob; order: Order }>(`/api/orders/${orderId}/jobs`, { method: 'POST', body: JSON.stringify(input) });
 }
 
-/** Delete a job, giving its minutes and grams back. Answers the order with its new real cost. */
+/** Delete a planned job; it took nothing, so nothing is given back. Refused (409) once it has been finished. */
+export async function deletePlannedJob(orderId: string, jobId: number): Promise<Order> {
+  return (await request<{ order: Order }>(`/api/orders/${orderId}/jobs/${jobId}/plan`, { method: 'DELETE' })).order;
+}
+
+/** Delete a finished job, giving its minutes and grams back. Answers the order with its new real cost. */
 export async function deletePrintJob(orderId: string, jobId: number): Promise<Order> {
   return (await request<{ order: Order }>(`/api/orders/${orderId}/jobs/${jobId}`, { method: 'DELETE' })).order;
 }

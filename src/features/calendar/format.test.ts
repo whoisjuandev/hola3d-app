@@ -3,7 +3,7 @@ import type { CalendarData } from '../../../shared/calendar';
 import {
   barPlacement, dayItems, packTracks, dayTitle, monthGrid, monthTitle, readView, shiftAnchor, timeRange, viewRange, weekDays, weekTitle,
 } from './format';
-import { planDraft, planRequest } from './plan-form';
+import { planChanges, planDraft, planRequest } from './plan-form';
 
 describe('ranges', () => {
   it('lays a month out as six weeks from the Monday on or before the first', () => {
@@ -133,5 +133,13 @@ describe('plan form', () => {
     expect(planRequest({ orderId: '', printerId: '', date: '', time: '', hours: '', minutes: '', note: '' })).toEqual({
       printerId: null, plannedStart: null, estimatedMinutes: 0, note: '',
     });
+  });
+
+  it('sends only the fields an edit changed, so it does not undo another edit', () => {
+    const initial = { orderId: '0144', printerId: '1', date: '2026-11-26', time: '09:30', hours: '8', minutes: '15', note: 'Mitad' };
+    expect(planChanges({ ...initial, hours: '9', minutes: '15' }, initial)).toEqual({ estimatedMinutes: 555 });
+    expect(planChanges({ ...initial, hours: '7', minutes: '75' }, initial)).toEqual({});
+    expect(planChanges({ ...initial, time: '10:00', printerId: '3' }, initial)).toEqual({ printerId: 3, plannedStart: '2026-11-26T10:00' });
+    expect(planChanges(initial, initial)).toEqual({});
   });
 });
