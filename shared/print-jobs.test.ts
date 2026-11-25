@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { CostSettingsInput } from './cost-settings';
-import { printJobProblems, realCost, realProfit, validateNewPrintJob, type CostPrinter, type CostSpool, type RealCostJob } from './print-jobs';
+import {
+  jobCost, printJobProblems, realCost, realProfit, validateNewPrintJob, type CostedJob, type CostPrinter, type CostSpool, type JobCost, type JobCostInput,
+} from './print-jobs';
 
 // Every cost at zero, so each test turns on only the term it checks.
 const zero: CostSettingsInput = {
@@ -14,20 +16,48 @@ const silk: CostSpool = { price: 16000, netGrams: 500 };
 // A printer with no price or draw, so a test sees only the term it checks.
 const free: CostPrinter = { powerWatts: 0, purchasePrice: 0, lifetimeHours: 1 };
 
-function job(overrides: Partial<RealCostJob> = {}): RealCostJob {
-  return { status: 'terminada', actualMinutes: 60, printer: a1, filaments: [], ...overrides };
+function job(overrides: Partial<JobCostInput> = {}): JobCostInput {
+  return { actualMinutes: 60, labourMinutes: 0, extraCost: 0, filaments: [], ...overrides };
 }
+
+const noCost: JobCost = { material: 0, energy: 0, machineWear: 0, fixedCosts: 0, labour: 0, extra: 0 };
 
 describe('validateNewPrintJob', () => {
   const valid = { printerId: 1, actualMinutes: 95, result: 'fallida', note: ' Se despegó ', filaments: [{ spoolId: 1, grams: 25 }, { spoolId: 2, grams: 4 }] };
 
   it('accepts a finished job and trims the note', () => {
-    expect(validateNewPrintJob(valid)).toEqual({ ok: true, value: { ...valid, result: 'fallida', note: 'Se despegó' } });
+    expect(validateNewPrintJob(valid)).toEqual({ ok: true, value: { ...valid, result: 'fallida', note: 'Se despegó', labourMinutes: 0, extraCost: 0 } });
   });
 
   it('defaults the note to empty', () => {
     const { note: _note, ...rest } = valid;
-    expect(validateNewPrintJob(rest)).toEqual({ ok: true, value: { ...rest, result: 'fallida', note: '' } });
+    expect(validateNewPrintJob(rest)).toEqual({ ok: true, value: { ...rest, result: 'fallida', note: '', labourMinutes: 0, extraCost: 0 } });
+  });
+
+  it('accepts labour minutes and an extra cost, 0 or more', () => {
+    expect(validateNewPrintJob({ ...valid, labourMinutes: 45, extraCost: 900 })).toEqual({
+      ok: true, value: { ...valid, note: 'Se despegó', labourMinutes: 45, extraCost: 900 },
+    });
+    expect(validateNewPrintJob({ ...valid, labourMinutes: 0, extraCost: 0 })).toMatchObject({ ok: true, value: { labourMinutes: 0, extraCost: 0 } });
+  });
+
+  it('takes missing labour minutes and extra cost as 0', () => {
+    for (const missing of [null, '', undefined]) {
+      expect(validateNewPrintJob({ ...valid, labourMinutes: missing, extraCost: missing })).toMatchObject({ ok: true, value: { labourMinutes: 0, extraCost: 0 } });
+    }
+  });
+
+  it('rejects labour minutes that are not whole minutes from 0', () => {
+    for (const labourMinutes of [-1, 12.5, '45', true]) {
+      expect(validateNewPrintJob({ ...valid, labourMinutes }))
+        .toEqual({ ok: false, errors: { labourMinutes: 'Poné los minutos de mano de obra: un número entero desde 0.' } });
+    }
+  });
+
+  it('rejects an extra cost that is not whole pesos from 0', () => {
+    for (const extraCost of [-100, 99.5, '900', {}]) {
+      expect(validateNewPrintJob({ ...valid, extraCost })).toEqual({ ok: false, errors: { extraCost: 'Poné el costo extra en pesos, sin centavos.' } });
+    }
   });
 
   it('rejects minutes that are not above 0', () => {
@@ -87,72 +117,98 @@ describe('printJobProblems', () => {
   });
 });
 
-describe('realCost terms', () => {
+describe('jobCost terms', () => {
   it('material: grams × spool price ÷ spool net weight, over every spool of the job', () => {
     // 30 g × 21000/1000 + 15 g × 16000/500 = 630 + 480 = 1110
-    const r = realCost([job({ printer: free, filaments: [{ grams: 30, spool: white }, { grams: 15, spool: silk }] })], zero);
-    expect(r).toMatchObject({ material: 1110, total: 1110, grams: 45 });
+    expect(jobCost(job({ filaments: [{ grams: 30, spool: white }, { grams: 15, spool: silk }] }), free, zero)).toEqual({ ...noCost, material: 1110 });
   });
 
   it('energy: watts ÷ 1000 × actual hours × kWh price', () => {
     // 100 W ÷ 1000 × 6 h × $200 = 120
-    expect(realCost([job({ actualMinutes: 360 })], { ...zero, kwhPrice: 200 })).toMatchObject({ energy: 120, total: 120 + 864 });
+    expect(jobCost(job({ actualMinutes: 360 }), { ...free, powerWatts: 100 }, { ...zero, kwhPrice: 200 })).toEqual({ ...noCost, energy: 120 });
   });
 
   it('machine wear: actual hours × purchase price ÷ lifetime hours', () => {
     // 6 h × 720000 ÷ 5000 = 864
-    expect(realCost([job({ actualMinutes: 360 })], zero)).toMatchObject({ machineWear: 864, total: 864, minutes: 360 });
+    expect(jobCost(job({ actualMinutes: 360 }), { ...a1, powerWatts: 0 }, zero)).toEqual({ ...noCost, machineWear: 864 });
   });
 
   it('fixed costs: actual hours × monthly fixed costs ÷ monthly print hours', () => {
     // 6 h × 120000 ÷ 200 = 3600
-    expect(realCost([job({ actualMinutes: 360, printer: free })], { ...zero, monthlyFixedCosts: 120000, monthlyPrintHours: 200 }))
-      .toMatchObject({ fixedCosts: 3600, total: 3600 });
+    expect(jobCost(job({ actualMinutes: 360 }), free, { ...zero, monthlyFixedCosts: 120000, monthlyPrintHours: 200 })).toEqual({ ...noCost, fixedCosts: 3600 });
   });
 
-  it('leaves out labour, packaging and the failure allowance', () => {
-    const settings = { ...zero, labourPerHour: 6000, packagingCost: 900, failurePercent: 50, marginPercent: 60, commissionPercent: 10 };
-    const r = realCost([job({ actualMinutes: 360, filaments: [{ grams: 30, spool: white }] })], settings);
-    expect(r).toEqual({ material: 630, energy: 0, machineWear: 864, fixedCosts: 0, total: 1494, minutes: 360, grams: 30, jobs: 1, failedJobs: 0 });
+  it('labour: labour minutes ÷ 60 × the hourly rate, in whole pesos', () => {
+    // 45 min × 7000/h = 5250; 40 min × 7000/h = 4666.67 → 4667
+    expect(jobCost(job({ labourMinutes: 45 }), free, { ...zero, labourPerHour: 7000 })).toEqual({ ...noCost, labour: 5250 });
+    expect(jobCost(job({ labourMinutes: 40 }), free, { ...zero, labourPerHour: 7000 })).toEqual({ ...noCost, labour: 4667 });
   });
 
-  it('counts failed jobs like the others', () => {
-    const r = realCost([job({ status: 'fallida', filaments: [{ grams: 10, spool: white }] }), job({ filaments: [{ grams: 10, spool: white }] })], zero);
-    expect(r).toMatchObject({ material: 420, jobs: 2, failedJobs: 1, minutes: 120, grams: 20 });
+  it('extra: the extra cost as logged', () => {
+    expect(jobCost(job({ extraCost: 900 }), free, zero)).toEqual({ ...noCost, extra: 900 });
   });
 
-  it('skips planned jobs, and is null without a printed job', () => {
-    expect(realCost([job({ status: 'planeada', actualMinutes: null })], zero)).toBeNull();
-    expect(realCost([], zero)).toBeNull();
+  it('adds no failure allowance, margin, commission or default packaging', () => {
+    const settings = { ...zero, failurePercent: 50, marginPercent: 60, commissionPercent: 10, packagingCost: 900, roundingStep: 100 };
+    expect(jobCost(job({ actualMinutes: 360, filaments: [{ grams: 30, spool: white }] }), { ...a1, powerWatts: 0 }, settings))
+      .toEqual({ ...noCost, material: 630, machineWear: 864 });
+  });
+
+  it('works out a whole job, checked by hand', () => {
+    /*
+     * Settings: kWh $215, labour $7000/h, fixed $150000 over 180 h ($833.33/h). La A1: 95 W, $720000 over 5000 h ($144/h).
+     * 420 min (7 h), 60 g of white and 35 g of yellow at $21/g, 40 min of labour and $900 of packaging:
+     *   material 95 × 21 = 1995;  energy 0.095 × 7 × 215 = 142.98 → 143;  wear 7 × 144 = 1008;  fixed 7 × 833.33 = 5833.33 → 5833;
+     *   labour 40 ÷ 60 × 7000 = 4666.67 → 4667;  extra 900.
+     */
+    const settings = { ...zero, kwhPrice: 215, labourPerHour: 7000, monthlyFixedCosts: 150000, monthlyPrintHours: 180 };
+    const yellow = { price: 21000, netGrams: 1000 };
+    const cost = jobCost(
+      job({ actualMinutes: 420, labourMinutes: 40, extraCost: 900, filaments: [{ grams: 60, spool: white }, { grams: 35, spool: yellow }] }),
+      { powerWatts: 95, purchasePrice: 720000, lifetimeHours: 5000 }, settings,
+    );
+    expect(cost).toEqual({ material: 1995, energy: 143, machineWear: 1008, fixedCosts: 5833, labour: 4667, extra: 900 });
   });
 });
 
-describe('realCost worked example', () => {
-  /*
-   * Checked by hand. Settings: kWh $215, fixed $150000 over 180 h ($833.33/h). La A1: 95 W, $720000 over 5000 h ($144/h).
-   * White and yellow spools: $21000 per 1000 g ($21/g).
-   *
-   * Job 1, failed after 95 min (1.5833 h), 25 g of white:
-   *   material 25 × 21 = 525;  energy 0.095 × 1.5833 × 215 = 32.34 → 32;  wear 1.5833 × 144 = 228;  fixed 1.5833 × 833.33 = 1319.44 → 1319
-   * Job 2, ok in 420 min (7 h), 60 g of white and 35 g of yellow:
-   *   material 95 × 21 = 1995;  energy 0.095 × 7 × 215 = 142.98 → 143;  wear 7 × 144 = 1008;  fixed 7 × 833.33 = 5833.33 → 5833
-   * Order: material 2520, energy 175, wear 1236, fixed 7152, total 11083. Price $18000 → real profit 6917.
-   */
-  const settings = { ...zero, kwhPrice: 215, monthlyFixedCosts: 150000, monthlyPrintHours: 180 };
-  const printer = { powerWatts: 95, purchasePrice: 720000, lifetimeHours: 5000 };
-  const yellow = { price: 21000, netGrams: 1000 };
-  const cost = realCost([
-    job({ status: 'fallida', actualMinutes: 95, printer, filaments: [{ grams: 25, spool: white }] }),
-    job({ status: 'terminada', actualMinutes: 420, printer, filaments: [{ grams: 60, spool: white }, { grams: 35, spool: yellow }] }),
-  ], settings);
+describe('realCost from stored job costs', () => {
+  // Stored terms, as logged; realCost never sees a printer, spool or setting.
+  const first: CostedJob = {
+    status: 'fallida', actualMinutes: 95, filaments: [{ grams: 25 }],
+    cost: { material: 525, energy: 32, machineWear: 228, fixedCosts: 1319, labour: 0, extra: 0 },
+  };
+  const second: CostedJob = {
+    status: 'terminada', actualMinutes: 420, filaments: [{ grams: 60 }, { grams: 35 }],
+    cost: { material: 1995, energy: 143, machineWear: 1008, fixedCosts: 5833, labour: 4667, extra: 900 },
+  };
 
-  it('adds every job term by term', () => {
-    expect(cost).toEqual({ material: 2520, energy: 175, machineWear: 1236, fixedCosts: 7152, total: 11083, minutes: 515, grams: 120, jobs: 2, failedJobs: 1 });
+  it('adds every stored term over the jobs, failed ones included', () => {
+    expect(realCost([first, second])).toEqual({
+      material: 2520, energy: 175, machineWear: 1236, fixedCosts: 7152, labour: 4667, extra: 900, total: 16650,
+      minutes: 515, grams: 120, jobs: 2, failedJobs: 1,
+    });
+  });
+
+  it('adds labour and the extra cost to the total', () => {
+    const labourOnly: CostedJob = { ...second, cost: { ...noCost, labour: 3000, extra: 500 } };
+    expect(realCost([labourOnly])).toMatchObject({ labour: 3000, extra: 500, total: 3500 });
+  });
+
+  it('counts a failed job like the others, with no failure allowance on top', () => {
+    expect(realCost([first])).toEqual({
+      material: 525, energy: 32, machineWear: 228, fixedCosts: 1319, labour: 0, extra: 0, total: 2104, minutes: 95, grams: 25, jobs: 1, failedJobs: 1,
+    });
+  });
+
+  it('skips planned jobs, and is null without a printed job', () => {
+    expect(realCost([{ status: 'planeada', actualMinutes: null, filaments: [], cost: noCost }])).toBeNull();
+    expect(realCost([])).toBeNull();
   });
 
   it('real profit is the order price minus the real cost', () => {
-    expect(realProfit(18000, cost)).toBe(6917);
-    expect(realProfit(10000, cost)).toBe(-1083);
+    const cost = realCost([first, second]);
+    expect(realProfit(18000, cost)).toBe(1350);
+    expect(realProfit(10000, cost)).toBe(-6650);
     expect(realProfit(18000, null)).toBeNull();
   });
 });

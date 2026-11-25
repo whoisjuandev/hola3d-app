@@ -61,13 +61,20 @@ INSERT INTO spools (id, material, color_name, color_hex, brand, net_grams, remai
 (7, 'PETG', 'Blanco', '#f4f4f4', 'Grilon3', 1000, 870, 24000, 200, 'Para las piezas de robótica.', '2026-11-12T12:00:00Z', '2026-11-18T12:00:00Z'),
 (8, 'TPU', 'Negro', '#1a1a1a', 'Grilon3', 500, 380, 19000, 100, 'Flexible. Imprimir lento.', '2026-07-21T12:00:00Z', '2026-10-05T12:00:00Z');
 
--- Logged print jobs, one of them failed. Order 0142 has printed half of its keychains so far.
-INSERT INTO print_jobs (id, order_id, printer_id, status, planned_start, estimated_minutes, actual_minutes, result, note, created_at, updated_at) VALUES
-(1, '0140', 1, 'fallida', NULL, NULL, 95, 'fallida', 'Se despegó de la cama a la hora y media.', '2026-11-14T15:00:00Z', '2026-11-14T15:00:00Z'),
-(2, '0140', 1, 'terminada', NULL, NULL, 420, 'ok', 'Segundo intento, con brim.', '2026-11-15T10:00:00Z', '2026-11-15T10:00:00Z'),
-(3, '0141', 1, 'terminada', NULL, NULL, 270, 'ok', '', '2026-11-18T09:00:00Z', '2026-11-18T09:00:00Z'),
-(4, '0143', 2, 'terminada', NULL, NULL, 180, 'ok', '', '2026-11-17T12:00:00Z', '2026-11-17T12:00:00Z'),
-(5, '0142', 1, 'terminada', NULL, NULL, 156, 'ok', 'Primera tanda: 6 de 12.', '2026-11-20T09:00:00Z', '2026-11-20T09:00:00Z');
+-- Logged print jobs, one of them failed. Order 0142 has printed half of its keychains so far. Each job carries the cost
+-- it stored when it was logged, worked out with the printers and spools above and the cost settings at the end of this
+-- file (kWh $215, labour $7000/h, $150000 of fixed costs over 180 h), as `jobCost` in shared/print-jobs.ts does:
+--   1: 525 + 32 + 228 + 1319 = 2104                         2: 1995 + 143 + 1008 + 5833 + labour 4667 (40 min) + extra 900 = 14546
+--   3: 3290 + 92 + 648 + 3750 = 7780                        4: 2233 + 71 + 320 + 2500 + labour 2333 (20 min) + extra 900 = 8357
+--   5: 1134 + 53 + 374 + 2167 + labour 3500 (30 min) = 7228
+-- Real cost per order: 0140 16650 (price 18000), 0141 7780, 0142 7228, 0143 8357.
+INSERT INTO print_jobs (id, order_id, printer_id, status, planned_start, estimated_minutes, actual_minutes, result, labour_minutes, extra_cost,
+  cost_material, cost_energy, cost_machine_wear, cost_fixed, cost_labour, cost_extra, note, created_at, updated_at) VALUES
+(1, '0140', 1, 'fallida', NULL, NULL, 95, 'fallida', 0, 0, 525, 32, 228, 1319, 0, 0, 'Se despegó de la cama a la hora y media.', '2026-11-14T15:00:00Z', '2026-11-14T15:00:00Z'),
+(2, '0140', 1, 'terminada', NULL, NULL, 420, 'ok', 40, 900, 1995, 143, 1008, 5833, 4667, 900, 'Segundo intento, con brim. Lijado y caja de regalo.', '2026-11-15T10:00:00Z', '2026-11-15T10:00:00Z'),
+(3, '0141', 1, 'terminada', NULL, NULL, 270, 'ok', 0, 0, 3290, 92, 648, 3750, 0, 0, '', '2026-11-18T09:00:00Z', '2026-11-18T09:00:00Z'),
+(4, '0143', 2, 'terminada', NULL, NULL, 180, 'ok', 20, 900, 2233, 71, 320, 2500, 2333, 900, 'Embalada en caja.', '2026-11-17T12:00:00Z', '2026-11-17T12:00:00Z'),
+(5, '0142', 1, 'terminada', NULL, NULL, 156, 'ok', 30, 0, 1134, 53, 374, 2167, 3500, 0, 'Primera tanda: 6 de 12.', '2026-11-20T09:00:00Z', '2026-11-20T09:00:00Z');
 
 INSERT INTO print_job_filaments (id, job_id, spool_id, grams) VALUES
 (1, 1, 1, 25),

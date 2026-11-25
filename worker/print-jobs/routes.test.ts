@@ -8,6 +8,7 @@ import type { Spool } from '../../shared/spools';
 import { memoryTables, type StoredPrintJob } from '../memory';
 import { memoryOrderRepository } from '../orders/repository';
 import { memoryPrinterRepository } from '../printers/repository';
+import { memoryCostSettingsRepository } from '../settings/repository';
 import { memorySpoolRepository, type SpoolRepository } from '../spools/repository';
 import { memoryPrintJobRepository } from './repository';
 import { handlePrintJobs } from './routes';
@@ -30,23 +31,25 @@ const white: Spool = {
   lowStockGrams: 150, note: '', createdAt: stamp, updatedAt: stamp,
 };
 const yellow: Spool = { ...white, id: 2, colorName: 'Amarillo', colorHex: '#ffc42e', brand: '', remainingGrams: 30 };
-// kWh $200, fixed costs $600 per print hour; labour, packaging and failures do not enter the real cost.
+// kWh $200, fixed costs $600 per print hour, labour $6000 per hour; packaging and failures do not enter a job's cost.
 const settings: CostSettings = {
   kwhPrice: 200, labourPerHour: 6000, failurePercent: 10, marginPercent: 50, monthlyFixedCosts: 120000, monthlyPrintHours: 200,
   packagingCost: 800, roundingStep: 100, commissionPercent: 0, updatedAt: stamp,
 };
 
-// Already logged: 2 h on La A1 with 36 g of white. Material 756, energy 40, wear 288, fixed 1200 = 2284.
+// Already logged: 2 h on La A1 with 36 g of white, 30 min of labour and $500 of packaging, when white cost $20000. Its stored
+// cost: material 720 (not the 756 white would cost now), energy 40, wear 288, fixed 1200, labour 3000, extra 500 = 5748.
+const loggedCost = { material: 720, energy: 40, machineWear: 288, fixedCosts: 1200, labour: 3000, extra: 500 };
 const logged: StoredPrintJob = {
   id: 1, orderId: '0142', printerId: 1, status: 'terminada', result: 'ok', plannedStart: null, estimatedMinutes: null, actualMinutes: 120,
-  note: 'Primera tanda', filaments: [{ spoolId: 1, grams: 36 }], createdAt: stamp, updatedAt: stamp,
+  labourMinutes: 30, extraCost: 500, cost: loggedCost, note: 'Primera tanda', filaments: [{ spoolId: 1, grams: 36 }], createdAt: stamp, updatedAt: stamp,
 };
 const loggedView: PrintJob = {
   ...logged, printer: 'La A1', filaments: [{ spoolId: 1, spool: 'PLA Blanco · Grilon3', colorHex: '#ffffff', grams: 36 }],
 };
 
 function setup(options: { spools?: (repo: SpoolRepository) => SpoolRepository } = {}) {
-  const tables = memoryTables([cafe], [keychains, pot], [], { printers: [a1], spools: [white, yellow], printJobs: [logged], settings });
+  const tables = memoryTables([cafe], [keychains, pot], [], { printers: [a1], spools: [white, yellow], printJobs: [logged] });
   const printers = memoryPrinterRepository(tables);
   const spoolRepo = memorySpoolRepository(tables);
   const deps = {
@@ -54,6 +57,7 @@ function setup(options: { spools?: (repo: SpoolRepository) => SpoolRepository } 
     orders: memoryOrderRepository(tables),
     printers,
     spools: options.spools ? options.spools(spoolRepo) : spoolRepo,
+    settings: memoryCostSettingsRepository(settings),
   };
   const call = async (method: string, path: string, body?: unknown) => {
     const url = new URL(`https://app.test${path}`);
@@ -69,7 +73,7 @@ function setup(options: { spools?: (repo: SpoolRepository) => SpoolRepository } 
     jobs: (await call('GET', '/api/orders/0142/jobs')).body.jobs,
     otherJobs: (await call('GET', '/api/orders/0143/jobs')).body.jobs,
   });
-  return { ...deps, call, snapshot };
+  return { ...deps, spoolRepo, call, snapshot };
 }
 
 const newJob = { printerId: 1, actualMinutes: 90, result: 'ok', note: 'Segunda tanda', filaments: [{ spoolId: 1, grams: 30 }, { spoolId: 2, grams: 30 }] };
@@ -81,7 +85,7 @@ describe('GET /api/orders/:id/jobs', () => {
       status: 200,
       body: {
         jobs: [loggedView],
-        cost: { material: 756, energy: 40, machineWear: 288, fixedCosts: 1200, total: 2284, minutes: 120, grams: 36, jobs: 1, failedJobs: 0 },
+        cost: { ...loggedCost, total: 5748, minutes: 120, grams: 36, jobs: 1, failedJobs: 0 },
       },
     });
   });
@@ -104,7 +108,8 @@ describe('POST /api/orders/:id/jobs', () => {
     expect(status).toBe(201);
     const job: PrintJob = {
       id: 2, orderId: '0142', printerId: 1, printer: 'La A1', status: 'terminada', result: 'ok', plannedStart: null, estimatedMinutes: null,
-      actualMinutes: 90, note: 'Segunda tanda',
+      actualMinutes: 90, labourMinutes: 0, extraCost: 0, note: 'Segunda tanda',
+      cost: { material: 1260, energy: 30, machineWear: 216, fixedCosts: 900, labour: 0, extra: 0 },
       filaments: [
         { spoolId: 1, spool: 'PLA Blanco · Grilon3', colorHex: '#ffffff', grams: 30 },
         { spoolId: 2, spool: 'PLA Amarillo', colorHex: '#ffc42e', grams: 30 },
@@ -112,7 +117,7 @@ describe('POST /api/orders/:id/jobs', () => {
       createdAt: expect.any(String) as unknown as string, updatedAt: expect.any(String) as unknown as string,
     };
     // Job 2: material 60 g × 21 = 1260, energy 0.1 × 1.5 × 200 = 30, wear 1.5 × 144 = 216, fixed 1.5 × 600 = 900 → 2406.
-    expect(body).toEqual({ job, order: { ...keychains, realCost: 2284 + 2406, realProfit: 36000 - 4690 } });
+    expect(body).toEqual({ job, order: { ...keychains, realCost: 5748 + 2406, realProfit: 36000 - 8154 } });
     expect(await snapshot()).toEqual({
       printMinutes: 7290, grams: [[1, 610], [2, 0]], jobs: [loggedView, job], otherJobs: [],
     });
@@ -126,6 +131,43 @@ describe('POST /api/orders/:id/jobs', () => {
     // material 420 + energy 30 + wear 216 + fixed 900 = 1566
     expect(body.order).toMatchObject({ id: '0143', realCost: 1566, realProfit: 12000 - 1566 });
     expect(await snapshot()).toMatchObject({ printMinutes: 7290, grams: [[1, 620], [2, 30]] });
+  });
+
+  it('stores labour minutes, the extra cost and the six cost terms with the job', async () => {
+    const { call } = setup();
+    const { status, body } = await call('POST', '/api/orders/0143/jobs', { ...newJob, labourMinutes: 45, extraCost: 900 });
+    expect(status).toBe(201);
+    // Labour 45 min × $6000/h = 4500; extra 900. Material 1260, energy 30, wear 216, fixed 900 as above. Total 7806.
+    const cost = { material: 1260, energy: 30, machineWear: 216, fixedCosts: 900, labour: 4500, extra: 900 };
+    expect(body.job).toMatchObject({ labourMinutes: 45, extraCost: 900, cost });
+    expect(body.order).toMatchObject({ id: '0143', realCost: 7806, realProfit: 12000 - 7806 });
+    expect((await call('GET', '/api/orders/0143/jobs')).body).toMatchObject({
+      jobs: [{ labourMinutes: 45, extraCost: 900, cost }], cost: { ...cost, total: 7806, jobs: 1, failedJobs: 0 },
+    });
+  });
+
+  it('keeps a job\'s cost after the spool price, the printer price and the settings change', async () => {
+    const { call, orders, printers, spoolRepo, settings: settingsRepo } = setup();
+    expect((await call('POST', '/api/orders/0143/jobs', { ...newJob, labourMinutes: 45, extraCost: 900 })).status).toBe(201);
+    const before = { jobs: await call('GET', '/api/orders/0143/jobs'), order: await orders.get('0143'), other: await call('GET', '/api/orders/0142/jobs') };
+    await spoolRepo.update(1, { price: 42000 });
+    await spoolRepo.update(2, { price: 30000, netGrams: 500 });
+    await printers.update(1, { purchasePrice: 1500000, lifetimeHours: 1000, powerWatts: 300 });
+    const { updatedAt: _at, ...costs } = settings;
+    await settingsRepo.save({ ...costs, kwhPrice: 900, labourPerHour: 20000, monthlyFixedCosts: 500000, monthlyPrintHours: 50 });
+    expect({ jobs: await call('GET', '/api/orders/0143/jobs'), order: await orders.get('0143'), other: await call('GET', '/api/orders/0142/jobs') })
+      .toEqual(before);
+    expect(before.order).toMatchObject({ realCost: 7806 });
+  });
+
+  it('rejects labour minutes that are not whole minutes from 0 and changes nothing', async () => {
+    await expectRejected({ ...newJob, labourMinutes: -10 }, { labourMinutes: 'Poné los minutos de mano de obra: un número entero desde 0.' });
+    await expectRejected({ ...newJob, labourMinutes: 12.5 }, { labourMinutes: 'Poné los minutos de mano de obra: un número entero desde 0.' });
+  });
+
+  it('rejects an extra cost that is not whole pesos from 0 and changes nothing', async () => {
+    await expectRejected({ ...newJob, extraCost: -900 }, { extraCost: 'Poné el costo extra en pesos, sin centavos.' });
+    await expectRejected({ ...newJob, extraCost: '900' }, { extraCost: 'Poné el costo extra en pesos, sin centavos.' });
   });
 
   async function expectRejected(body: unknown, fields: Record<string, string>) {
@@ -211,7 +253,7 @@ describe('DELETE /api/orders/:id/jobs/:jobId', () => {
     expect(logged2.status).toBe(201);
     const { status, body } = await call('DELETE', '/api/orders/0142/jobs/2');
     expect(status).toBe(200);
-    expect(body).toEqual({ order: { ...keychains, realCost: 2284, realProfit: 36000 - 2284 } });
+    expect(body).toEqual({ order: { ...keychains, realCost: 5748, realProfit: 36000 - 5748 } });
     expect(await snapshot()).toEqual(before);
   });
 
@@ -247,8 +289,8 @@ it('rejects other methods', async () => {
 
 it('leaves other paths to the caller', async () => {
   const url = new URL('https://app.test/api/orders/0142/stage');
-  const { jobs, orders, printers, spools } = setup();
-  expect(await handlePrintJobs(new Request(url, { method: 'PUT' }), url, { jobs, orders, printers, spools })).toBeNull();
+  const { jobs, orders, printers, spools, settings } = setup();
+  expect(await handlePrintJobs(new Request(url, { method: 'PUT' }), url, { jobs, orders, printers, spools, settings })).toBeNull();
   const list = new URL('https://app.test/api/orders');
-  expect(await handlePrintJobs(new Request(list), list, { jobs, orders, printers, spools })).toBeNull();
+  expect(await handlePrintJobs(new Request(list), list, { jobs, orders, printers, spools, settings })).toBeNull();
 });

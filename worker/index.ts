@@ -24,6 +24,7 @@ const HANDLERS: Handler[] = [
     orders: d1OrderRepository(env.DB),
     printers: d1PrinterRepository(env.DB),
     spools: d1SpoolRepository(env.DB),
+    settings: d1CostSettingsRepository(env.DB),
   }),
   (request, url, env) => handleClients(request, url, d1ClientRepository(env.DB), d1OrderRepository(env.DB)),
   (request, url, env) => handlePrinters(request, url, d1PrinterRepository(env.DB)),

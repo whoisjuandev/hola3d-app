@@ -1,7 +1,7 @@
 // Print jobs on an order and the order's real cost, shared by the Worker API and the React app.
 import { energyCost, fixedCostsFor, machineWearCost, spoolLabel, spoolPricePerGram, spoolShortages, type CalcSpool } from './calculator';
 import type { CostSettingsInput } from './cost-settings';
-import { asBody, readText, type Errors } from './fields';
+import { asBody, readInteger, readText, type Errors } from './fields';
 import type { ValidationResult } from './orders';
 import type { Printer } from './printers';
 import type { Spool } from './spools';
@@ -37,6 +37,9 @@ export interface PrintJob {
   plannedStart: string | null; // YYYY-MM-DDTHH:MM; only for planned jobs
   estimatedMinutes: number | null; // only for planned jobs
   actualMinutes: number | null; // null while planned
+  labourMinutes: number; // preparation and post-processing actually spent; 0 when not logged
+  extraCost: number; // whole pesos: packaging and other supplies; 0 when not logged
+  cost: JobCost; // stored when the job was logged; all 0 for a planned job
   note: string;
   filaments: PrintJobFilament[];
   createdAt: string;
@@ -48,6 +51,8 @@ export interface NewPrintJob {
   printerId: number;
   actualMinutes: number;
   result: PrintResult;
+  labourMinutes: number;
+  extraCost: number;
   note: string;
   filaments: { spoolId: number; grams: number }[];
 }
@@ -69,6 +74,8 @@ export function validateNewPrintJob(input: unknown): ValidationResult<NewPrintJo
   if (!isPositiveInteger(actualMinutes)) errors.actualMinutes = 'Poné cuánto tardó: más de 0 minutos.';
   const result = body.result;
   if (typeof result !== 'string' || !(PRINT_RESULTS as readonly string[]).includes(result)) errors.result = 'Elegí cómo salió: bien o fallida.';
+  const labourMinutes = readInteger(body, errors, 'labourMinutes', 0, 'Poné los minutos de mano de obra: un número entero desde 0.', 0);
+  const extraCost = readInteger(body, errors, 'extraCost', 0, 'Poné el costo extra en pesos, sin centavos.', 0);
   const note = readText(body, errors, 'note', 1000, false);
 
   const raw = body.filaments;
@@ -93,7 +100,10 @@ export function validateNewPrintJob(input: unknown): ValidationResult<NewPrintJo
   if (Object.keys(errors).length) return { ok: false, errors };
   return {
     ok: true,
-    value: { printerId: printerId as number, actualMinutes: actualMinutes as number, result: result as PrintResult, note, filaments },
+    value: {
+      printerId: printerId as number, actualMinutes: actualMinutes as number, result: result as PrintResult,
+      labourMinutes: labourMinutes as number, extraCost: extraCost as number, note, filaments,
+    },
   };
 }
 
@@ -101,7 +111,7 @@ export function validateNewPrintJob(input: unknown): ValidationResult<NewPrintJo
  * What stops a valid job from being logged with the stored printers and spools: a printer or spool that does not
  * exist, or a spool with fewer grams left than the job used. Null when nothing does.
  */
-export function printJobProblems(job: NewPrintJob, printers: Pick<Printer, 'id'>[], spools: CalcSpool[]): Errors | null {
+export function printJobProblems(job: Pick<NewPrintJob, 'printerId' | 'filaments'>, printers: Pick<Printer, 'id'>[], spools: CalcSpool[]): Errors | null {
   const errors: Errors = {};
   if (!printers.some((p) => p.id === job.printerId)) errors.printerId = 'Esa impresora no existe.';
   const missing = job.filaments.find((f) => !spools.some((s) => s.id === f.spoolId));
@@ -122,25 +132,68 @@ export function printJobProblems(job: NewPrintJob, printers: Pick<Printer, 'id'>
 
 export type CostPrinter = Pick<Printer, 'powerWatts' | 'purchasePrice' | 'lifetimeHours'>;
 export type CostSpool = Pick<Spool, 'price' | 'netGrams'>;
+export type JobCostSettings = Pick<CostSettingsInput, 'kwhPrice' | 'labourPerHour' | 'monthlyFixedCosts' | 'monthlyPrintHours'>;
 
-/** A job with the printer and spool values its cost comes from. */
-export interface RealCostJob {
-  status: PrintJobStatus;
-  actualMinutes: number | null;
-  printer: CostPrinter;
-  filaments: { grams: number; spool: CostSpool }[];
-}
-
-/**
- * The real cost of an order, from what its jobs actually used. Same terms as the calculator (S5), each in whole
- * pesos. No failure allowance: failed jobs are counted for real. Labour and packaging are not known per job, so
- * they are left out.
- */
-export interface RealCost {
+/** The cost of one job, term by term in whole pesos, as stored when it was logged. */
+export interface JobCost {
   material: number;
   energy: number;
   machineWear: number;
   fixedCosts: number;
+  labour: number;
+  extra: number;
+}
+
+export type JobCostKey = keyof JobCost;
+
+/** The six terms in display order. */
+export const REAL_COST_TERMS: readonly { key: JobCostKey; label: string }[] = [
+  { key: 'material', label: 'Material' },
+  { key: 'energy', label: 'Luz' },
+  { key: 'machineWear', label: 'Desgaste de máquina' },
+  { key: 'fixedCosts', label: 'Gastos fijos' },
+  { key: 'labour', label: 'Mano de obra' },
+  { key: 'extra', label: 'Packaging y extras' },
+];
+
+export const NO_JOB_COST: JobCost = { material: 0, energy: 0, machineWear: 0, fixedCosts: 0, labour: 0, extra: 0 };
+
+/** What a job's cost is worked out from: its actual numbers, and the spool each filament came from. */
+export interface JobCostInput {
+  actualMinutes: number;
+  labourMinutes: number;
+  extraCost: number;
+  filaments: { grams: number; spool: CostSpool }[];
+}
+
+/**
+ * The cost of one finished job with the printer, spool prices and settings of this moment, to be stored with it.
+ * Material, energy, machine wear and fixed costs as in the calculator (S5), from the actual grams and minutes;
+ * labour = labour minutes ÷ 60 × rate; extra = the extra cost as logged. No failure allowance, margin or default
+ * packaging. Each term is rounded to whole pesos.
+ */
+export function jobCost(job: JobCostInput, printer: CostPrinter, settings: JobCostSettings): JobCost {
+  const hours = job.actualMinutes / 60;
+  return {
+    material: Math.round(job.filaments.reduce((sum, f) => sum + f.grams * spoolPricePerGram(f.spool), 0)),
+    energy: energyCost(printer, hours, settings),
+    machineWear: machineWearCost(printer, hours),
+    fixedCosts: fixedCostsFor(hours, settings),
+    labour: Math.round((job.labourMinutes / 60) * settings.labourPerHour),
+    extra: job.extraCost,
+  };
+}
+
+/** The sum of a job's six terms. */
+export function jobCostTotal(cost: JobCost): number {
+  return REAL_COST_TERMS.reduce((sum, t) => sum + cost[t.key], 0);
+}
+
+/** A job as stored, with what the order's real cost needs from it. */
+export type CostedJob = Pick<PrintJob, 'status' | 'actualMinutes' | 'cost'> & { filaments: { grams: number }[] };
+
+/** The real cost of an order: the stored terms of its jobs added up, failed ones included. */
+export interface RealCost extends JobCost {
   total: number;
   minutes: number; // actual print minutes over the jobs
   grams: number; // grams over the jobs
@@ -148,37 +201,19 @@ export interface RealCost {
   failedJobs: number;
 }
 
-export const REAL_COST_TERMS: readonly { key: 'material' | 'energy' | 'machineWear' | 'fixedCosts'; label: string }[] = [
-  { key: 'material', label: 'Material' },
-  { key: 'energy', label: 'Luz' },
-  { key: 'machineWear', label: 'Desgaste de máquina' },
-  { key: 'fixedCosts', label: 'Gastos fijos' },
-];
-
-type RealCostSettings = Pick<CostSettingsInput, 'kwhPrice' | 'monthlyFixedCosts' | 'monthlyPrintHours'>;
-
 /**
- * Apply the calculator's formula to the actual minutes and grams of every printed job (failed ones included;
- * planned ones skipped). Each job is rounded term by term, like a calculator line, and the jobs are added up.
+ * Add up the stored cost of every printed job of an order (failed ones included; planned ones skipped). No failure
+ * allowance: failures are counted for real. Needs no prices or settings: each job's cost was frozen when logged.
  * Null when no job was printed yet.
  */
-export function realCost(jobs: RealCostJob[], settings: RealCostSettings): RealCost | null {
+export function realCost(jobs: CostedJob[]): RealCost | null {
   const printed = jobs.filter((j) => j.status !== 'planeada' && j.actualMinutes !== null);
   if (printed.length === 0) return null;
-  const cost: RealCost = { material: 0, energy: 0, machineWear: 0, fixedCosts: 0, total: 0, minutes: 0, grams: 0, jobs: 0, failedJobs: 0 };
+  const cost: RealCost = { ...NO_JOB_COST, total: 0, minutes: 0, grams: 0, jobs: 0, failedJobs: 0 };
   for (const job of printed) {
-    const minutes = job.actualMinutes as number;
-    const hours = minutes / 60;
-    const material = Math.round(job.filaments.reduce((sum, f) => sum + f.grams * spoolPricePerGram(f.spool), 0));
-    const energy = energyCost(job.printer, hours, settings);
-    const machineWear = machineWearCost(job.printer, hours);
-    const fixedCosts = fixedCostsFor(hours, settings);
-    cost.material += material;
-    cost.energy += energy;
-    cost.machineWear += machineWear;
-    cost.fixedCosts += fixedCosts;
-    cost.total += material + energy + machineWear + fixedCosts;
-    cost.minutes += minutes;
+    for (const t of REAL_COST_TERMS) cost[t.key] += job.cost[t.key];
+    cost.total += jobCostTotal(job.cost);
+    cost.minutes += job.actualMinutes as number;
     cost.grams += job.filaments.reduce((sum, f) => sum + f.grams, 0);
     cost.jobs += 1;
     if (job.status === 'fallida') cost.failedJobs += 1;

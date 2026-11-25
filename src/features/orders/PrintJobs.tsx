@@ -1,7 +1,9 @@
 // The "Impresiones" block of the order detail: the jobs printed for the order, logging a new one, and the real cost.
 import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
 import type { Order } from '../../../shared/orders';
-import { PRINT_RESULT_LABEL, REAL_COST_TERMS, type PrintJob, type PrintResult, type RealCost } from '../../../shared/print-jobs';
+import {
+  PRINT_RESULT_LABEL, REAL_COST_TERMS, jobCostTotal, realProfit, type PrintJob, type PrintResult, type RealCost,
+} from '../../../shared/print-jobs';
 import type { Printer } from '../../../shared/printers';
 import { spoolLabel } from '../../../shared/calculator';
 import type { Spool } from '../../../shared/spools';
@@ -82,7 +84,7 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
 
       {error && <p className="field__error" role="alert">{error}</p>}
 
-      <RealCostSummary order={order} cost={cost} />
+      <RealCostSummary price={order.price} cost={cost} />
 
       {logging && (
         <LogJobForm
@@ -105,6 +107,7 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
                 <b>{job.actualMinutes === null ? '—' : durationLabel(job.actualMinutes)}</b>
               </div>
               <span className="job__printer"><Icon name="printer" size={16} />{job.printer}</span>
+              <JobCostLine job={job} />
               <ul className="job__uses">
                 {job.filaments.map((f) => (
                   <li key={f.spoolId}>
@@ -134,15 +137,26 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
   );
 }
 
-function RealCostSummary({ order, cost }: { order: Order; cost: RealCost | null }) {
-  if (!cost || order.realCost === null) return null;
-  const loss = order.realProfit !== null && order.realProfit < 0;
+/** What the job cost when it was logged, with the labour and extras it carried. */
+function JobCostLine({ job }: { job: PrintJob }) {
+  if (job.status === 'planeada') return null;
+  const parts = [`Costó ${money(jobCostTotal(job.cost))}`];
+  if (job.labourMinutes > 0) parts.push(`${durationLabel(job.labourMinutes)} de mano de obra`);
+  if (job.extraCost > 0) parts.push(`${money(job.extraCost)} de extras`);
+  return <span className="job__cost">{parts.join(' · ')}</span>;
+}
+
+/** The totals come from the cost just fetched with the jobs, never from the board's copy of the order. */
+function RealCostSummary({ price, cost }: { price: number; cost: RealCost | null }) {
+  if (!cost) return null;
+  const profit = realProfit(price, cost) as number;
+  const loss = profit < 0;
   return (
     <div className="real-cost">
       <dl className="real-cost__totals">
-        <div><dt>Costo real</dt><dd>{money(order.realCost)}</dd></div>
-        <div><dt>{loss ? 'Pérdida real' : 'Ganancia real'}</dt><dd className={loss ? 'real-cost__loss' : undefined}>{money(order.realProfit ?? 0)}</dd></div>
-        <div><dt>Precio estimado</dt><dd>{money(order.price)}</dd></div>
+        <div><dt>Costo real</dt><dd>{money(cost.total)}</dd></div>
+        <div><dt>{loss ? 'Pérdida real' : 'Ganancia real'}</dt><dd className={loss ? 'real-cost__loss' : undefined}>{money(profit)}</dd></div>
+        <div><dt>Precio estimado</dt><dd>{money(price)}</dd></div>
       </dl>
       <details className="real-cost__details">
         <summary>
@@ -153,7 +167,7 @@ function RealCostSummary({ order, cost }: { order: Order; cost: RealCost | null 
           {REAL_COST_TERMS.map((t) => <div key={t.key}><dt>{t.label}</dt><dd>{money(cost[t.key])}</dd></div>)}
         </dl>
       </details>
-      <p className="muted">Con los tiempos y gramos reales, las fallidas incluidas. No suma mano de obra ni packaging: no se cargan por impresión.</p>
+      <p className="muted">Lo que costó cada impresión al cargarla, las fallidas incluidas. Si después cambian los precios, no cambia.</p>
     </div>
   );
 }
@@ -280,6 +294,30 @@ function LogJobForm({ orderId, onLogged, onCancel }: { orderId: string; onLogged
         {fieldError('result')}
       </fieldset>
 
+      <fieldset className="job-form__group">
+        <legend className="field__label">Además de imprimir (opcional)</legend>
+        <div className="job-form__time">
+          <label className="job-form__extra">
+            <span className="job-form__caption">Mano de obra</span>
+            <span className="job-form__unit">
+              <input className="field__control" inputMode="numeric" placeholder="0" value={draft.labourMinutes}
+                onChange={(e) => set('labourMinutes', e.target.value)} aria-invalid={!!errors.labourMinutes} aria-describedby={describedBy('labourMinutes')} />
+              <span>min</span>
+            </span>
+          </label>
+          <label className="job-form__extra">
+            <span className="job-form__caption">Packaging y extras</span>
+            <span className="job-form__unit">
+              <span>$</span>
+              <input className="field__control" inputMode="numeric" placeholder="0" value={draft.extraCost}
+                onChange={(e) => set('extraCost', e.target.value)} aria-invalid={!!errors.extraCost} aria-describedby={describedBy('extraCost')} />
+            </span>
+          </label>
+        </div>
+        {fieldError('labourMinutes')}
+        {fieldError('extraCost')}
+      </fieldset>
+
       <div className="field">
         <label className="field__label" htmlFor={`${uid}-note`}>Nota (opcional)</label>
         <textarea id={`${uid}-note`} className="field__control" value={draft.note} onChange={(e) => set('note', e.target.value)}
@@ -287,7 +325,7 @@ function LogJobForm({ orderId, onLogged, onCancel }: { orderId: string; onLogged
         {fieldError('note')}
       </div>
 
-      <p className="muted">Al guardar se suman las horas a la impresora y se descuentan los gramos de cada bobina.</p>
+      <p className="muted">Al guardar se suman las horas a la impresora, se descuentan los gramos de cada bobina y el costo queda fijo con los precios de hoy.</p>
       <div className="job-form__actions">
         <button type="button" className="btn btn--ghost btn--sm" onClick={onCancel}>Cancelar</button>
         <button type="submit" className="btn btn--sm" disabled={saving}>{saving ? 'Guardando…' : 'Guardar impresión'}</button>

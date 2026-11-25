@@ -8,11 +8,13 @@ export interface JobDraft {
   minutes: string;
   filaments: { spoolId: string; grams: string }[];
   result: PrintResult;
+  labourMinutes: string;
+  extraCost: string;
   note: string;
 }
 
 export function emptyJobDraft(printerId: string): JobDraft {
-  return { printerId, hours: '', minutes: '', filaments: [{ spoolId: '', grams: '' }], result: 'ok', note: '' };
+  return { printerId, hours: '', minutes: '', filaments: [{ spoolId: '', grams: '' }], result: 'ok', labourMinutes: '', extraCost: '', note: '' };
 }
 
 /** Hours and minutes as whole minutes; an empty part counts as 0. Other text comes back as typed, for the API to reject. */
@@ -23,12 +25,17 @@ export function draftMinutes(hours: string, minutes: string): number | string {
   return [hours && `${hours} h`, minutes && `${minutes} min`].filter(Boolean).join(' ');
 }
 
-/** The body of POST /api/orders/:id/jobs. Rows with neither spool nor grams are left out. */
+/**
+ * The body of POST /api/orders/:id/jobs. Rows with neither spool nor grams are left out. Empty labour minutes and
+ * extra cost go as null, which the API takes as 0.
+ */
 export function jobRequest(draft: JobDraft): Record<string, unknown> {
   return {
     printerId: draft.printerId ? Number(draft.printerId) : null,
     actualMinutes: draftMinutes(draft.hours, draft.minutes),
     result: draft.result,
+    labourMinutes: parseWhole(draft.labourMinutes),
+    extraCost: parseWhole(draft.extraCost),
     note: draft.note,
     filaments: draft.filaments
       .filter((f) => f.spoolId || f.grams.trim())

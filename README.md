@@ -8,7 +8,7 @@ The internal workshop app for Hola3D, a 3D printing shop. It tracks every order 
 
 | Section | State |
 |---|---|
-| Pedidos (orders) | Works end to end: board, search, new order (pick a client or type a new one), stage moves. The order detail logs print jobs (printer, time, grams per spool, result) and shows the real cost and real profit next to the price |
+| Pedidos (orders) | Works end to end: board, search, new order (pick a client or type a new one), stage moves. The order detail logs print jobs (printer, time, grams per spool, result, and optionally labour minutes and an extra cost); each job's cost is frozen when logged, and the detail shows the real cost in six terms and the real profit next to the price |
 | Clientes (clients) | List with search, create and edit. Client page with contact links, orders, total spent and balance owed |
 | Impresoras (printers) | List, create and edit. Shows accumulated print hours and machine wear per print hour; logged print jobs add their hours |
 | Filamento (spools) | List, create and edit. Filter by material, total stock in grams, low-stock warning; logged print jobs take their grams off |
@@ -48,7 +48,7 @@ One Cloudflare Worker serves both the React app and the API, and stores data in 
 |---|---|
 | `src/` | React 19 app (Vite, React Router). One folder per screen in `features/` (`orders/` is Pedidos, `clients/` Clientes, `printers/` Impresoras, `spools/` Filamento, `calculator/` Calculadora, `quotes/` Presupuestos and the quote print view), `shell/` the navigation, `ui/` pieces the screens share (API calls, form dialog, icons) |
 | `worker/` | The Worker: API under `/api/*`, everything else is the single-page app. One folder per module (`orders/`, `print-jobs/`, `clients/`, `printers/`, `spools/`, `settings/`, `quotes/`) with its routes and a storage port with a D1 and an in-memory adapter (the in-memory adapters share tables, `memory.ts`, where they read each other's rows); `index.ts` tries each module in turn |
-| `shared/` | Rules used by both sides: order stages, validation and search; client validation, name matching, total spent, balance owed and contact links; printer validation, hours and wear cost; spool validation, low stock, material filter and stock totals; cost settings validation and defaults; the cost formula and spool shortages for the calculator; quote validation, status rules, the orders a quote becomes and its WhatsApp message; print job validation and the real cost of an order |
+| `shared/` | Rules used by both sides: order stages, validation and search; client validation, name matching, total spent, balance owed and contact links; printer validation, hours and wear cost; spool validation, low stock, material filter and stock totals; cost settings validation and defaults; the cost formula and spool shortages for the calculator; quote validation, status rules, the orders a quote becomes and its WhatsApp message; print job validation, the cost of one job and the real cost of an order from its jobs' stored costs |
 | `migrations/` | D1 schema, one file per change |
 | `seed/` | Sample clients, quotes, orders, printers, spools, print jobs and cost settings, for local use only |
 
@@ -63,8 +63,8 @@ An order moves through five stages, in order:
 | GET | `/api/orders` | List all orders. Each one has `client` (the client's name), `clientId`, `quoteId` (the quote it was accepted from, or null), and `realCost` and `realProfit` (from its print jobs; null while it has none) |
 | POST | `/api/orders` | Create an order. It starts in `nuevo` and takes the next number, padded to four digits |
 | PUT | `/api/orders/:id/stage` | Move an order to another stage |
-| GET | `/api/orders/:id/jobs` | The order's print jobs, oldest first, and `cost`: its real cost term by term (null without jobs) |
-| POST | `/api/orders/:id/jobs` | Log a finished print job: store it, add its minutes to the printer and take its grams off each spool, in one atomic write. Answers the job and the order |
+| GET | `/api/orders/:id/jobs` | The order's print jobs, oldest first, each with its stored `cost`, and `cost`: the order's real cost term by term (null without jobs) |
+| POST | `/api/orders/:id/jobs` | Log a finished print job: store it with its cost, add its minutes to the printer and take its grams off each spool, in one atomic write. Answers the job and the order |
 | DELETE | `/api/orders/:id/jobs/:jobId` | Delete a logged job and give its minutes and grams back, in one atomic write. Answers the order |
 | GET | `/api/clients` | List clients, by name, each with `orderCount`, `totalSpent` and `balanceOwed` |
 | POST | `/api/clients` | Create a client |
@@ -156,15 +156,15 @@ curl -X POST http://localhost:5173/api/quotes/2/accept \
   -d '{"channel":"Instagram"}'
 ```
 
-A print job belongs to an order. Logging one needs `printerId`, `actualMinutes` (whole minutes, more than 0), `result` (`ok` or `fallida`) and `filaments`, one to 16 spools each with whole `grams` above 0 (`[{"spoolId":1,"grams":36}]`); `note` is optional. It answers 422 and changes nothing when the printer or a spool does not exist, when a spool appears twice, or when a spool has fewer grams left than the job used. The job, its grams per spool, the printer's minutes and every spool's grams are written in one D1 batch whose statements all repeat the same check, so two logs at the same time can never take a spool below 0 g. A job with result `ok` is stored as `terminada`, a failed one as `fallida`; the table also has `planeada`, `planned_start` and `estimated_minutes` for planning jobs on the calendar later. Deleting a job takes its minutes off the printer (not below 0) and gives its grams back to each spool (not above the net weight), also in one batch. Editing a printer or a spool writes only the fields sent, so an edit never overwrites the counters a job changed in between.
+A print job belongs to an order. Logging one needs `printerId`, `actualMinutes` (whole minutes, more than 0), `result` (`ok` or `fallida`) and `filaments`, one to 16 spools each with whole `grams` above 0 (`[{"spoolId":1,"grams":36}]`); `note`, `labourMinutes` (preparation and post-processing actually spent, whole minutes from 0) and `extraCost` (packaging and other supplies, whole pesos from 0) are optional, and the last two default to 0. A wrong `labourMinutes` or `extraCost` answers 422 on that field. It answers 422 and changes nothing when the printer or a spool does not exist, when a spool appears twice, or when a spool has fewer grams left than the job used. The job, its grams per spool, the printer's minutes and every spool's grams are written in one D1 batch whose statements all repeat the same check, so two logs at the same time can never take a spool below 0 g. A job with result `ok` is stored as `terminada`, a failed one as `fallida`; the table also has `planeada`, `planned_start` and `estimated_minutes` for planning jobs on the calendar later. Deleting a job takes its minutes off the printer (not below 0) and gives its grams back to each spool (not above the net weight), also in one batch. Editing a printer or a spool writes only the fields sent, so an edit never overwrites the counters a job changed in between.
 
-The real cost of an order applies the calculator's material, energy, machine wear and fixed-cost terms to the actual minutes and grams of each of its jobs, failed ones included, with the current printers, spools and cost settings; jobs are rounded term by term and added up. It has no failure allowance, because failures are counted for real, and no labour or packaging, which are not known per job (the screen says so). Real profit is the order's price minus its real cost; it can be negative. The formula is `realCost` in `shared/print-jobs.ts`.
+The cost of a job is worked out once, when it is logged, with the printer, spool prices and cost settings of that moment, and stored with the job in six terms, each in whole pesos: material, energy, machine wear and fixed costs as in the calculator, from the actual grams and minutes; labour = labour minutes ÷ 60 × the hourly rate; and the extra cost as logged. Later changes to prices or settings never change it. Migration `0007` added these columns and froze the jobs logged before it with the prices and settings of the moment it ran. The real cost of an order is the sum of the stored terms of all its jobs, failed ones included; it has no failure allowance, because failures are counted for real. Real profit is the order's price minus its real cost; it can be negative. The formulas are `jobCost` (one job, used when logging) and `realCost` (an order, from the stored costs, used on every read) in `shared/print-jobs.ts`.
 
 ```bash
-# Log 2 h 36 min on printer 1 for order 0142, with 36 g of spool 1 and 18 g of spool 2
+# Log 2 h 36 min on printer 1 for order 0142, with 36 g of spool 1 and 18 g of spool 2, 30 min of labour and $900 of packaging
 curl -X POST http://localhost:5173/api/orders/0142/jobs \
   -H 'content-type: application/json' \
-  -d '{"printerId":1,"actualMinutes":156,"result":"ok","filaments":[{"spoolId":1,"grams":36},{"spoolId":2,"grams":18}]}'
+  -d '{"printerId":1,"actualMinutes":156,"result":"ok","labourMinutes":30,"extraCost":900,"filaments":[{"spoolId":1,"grams":36},{"spoolId":2,"grams":18}]}'
 ```
 
 Errors come back as JSON with an `error` message in Spanish, since the app shows them as they are.

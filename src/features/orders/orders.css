@@ -131,6 +131,7 @@
 .job__uses li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; }
 .job__uses b { font-variant-numeric: tabular-nums; }
 .job__swatch { flex: none; width: 18px; height: 18px; border-radius: 999px; border: 2px solid var(--ink); }
+.job__cost { font-size: 13px; line-height: 18px; font-weight: 700; color: var(--soft); font-variant-numeric: tabular-nums; }
 .job__note { font-size: 14px; line-height: 20px; color: var(--soft); font-weight: 600; }
 .job__delete { align-self: flex-start; padding: 0; border: 0; background: none; color: var(--red); font-size: 13px; font-weight: 800; cursor: pointer; text-decoration: underline; text-underline-offset: 0.18em; }
 .job__confirm { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 12px; background: var(--yellow-soft); font-size: 14px; font-weight: 700; }
@@ -153,6 +154,8 @@
 .job-form__time { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .job-form__unit { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 800; color: var(--soft); }
 .job-form__unit .field__control { width: 100%; min-width: 0; }
+.job-form__extra { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.job-form__caption { font-size: 13px; font-weight: 700; color: var(--soft); }
 .job-form__use { display: grid; grid-template-columns: 18px minmax(0, 1fr) 92px auto; align-items: center; gap: 8px; }
 .job-form__use .field__control { min-width: 0; width: 100%; }
 .job-form__warn { grid-column: 2 / -1; }

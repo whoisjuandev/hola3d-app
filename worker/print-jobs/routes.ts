@@ -1,7 +1,12 @@
-import { printJobProblems, validateNewPrintJob, type NewPrintJob } from '../../shared/print-jobs';
+import type { CostSettingsInput } from '../../shared/cost-settings';
+import { jobCost, printJobProblems, validateNewPrintJob, type JobCost, type NewPrintJob } from '../../shared/print-jobs';
+import type { Printer } from '../../shared/printers';
+import type { Spool } from '../../shared/spools';
 import { json, problem, readJson } from '../http';
 import type { OrderRepository } from '../orders/repository';
 import type { PrinterRepository } from '../printers/repository';
+import type { CostSettingsRepository } from '../settings/repository';
+import { currentCostSettings } from '../settings/routes';
 import type { SpoolRepository } from '../spools/repository';
 import type { PrintJobRepository } from './repository';
 
@@ -10,6 +15,7 @@ export interface PrintJobDeps {
   orders: OrderRepository;
   printers: PrinterRepository;
   spools: SpoolRepository;
+  settings: CostSettingsRepository;
 }
 
 const JOBS_PATH = /^\/api\/orders\/(\d{4,})\/jobs$/;
@@ -51,7 +57,17 @@ async function problemsNow(job: NewPrintJob, deps: PrintJobDeps) {
   return printJobProblems(job, printers, spools);
 }
 
-/** Log a finished job: store it, add its minutes to the printer and take its grams off each spool, all or nothing. */
+/** The job's cost with the printer, spool prices and settings of now. The printer and spools were checked to exist. */
+function costNow(job: NewPrintJob, printers: Printer[], spools: Spool[], settings: CostSettingsInput): JobCost {
+  const printer = printers.find((p) => p.id === job.printerId) as Printer;
+  const filaments = job.filaments.map((f) => ({ grams: f.grams, spool: spools.find((s) => s.id === f.spoolId) as Spool }));
+  return jobCost({ ...job, filaments }, printer, settings);
+}
+
+/**
+ * Log a finished job: store it with its cost, add its minutes to the printer and take its grams off each spool, all
+ * or nothing. The cost is worked out here, once, and stored: later price or settings changes never change it.
+ */
 async function log(request: Request, orderId: string, deps: PrintJobDeps): Promise<Response> {
   const body = await readJson(request);
   if (body === undefined) return problem(400, 'El cuerpo tiene que ser JSON.');
@@ -59,10 +75,11 @@ async function log(request: Request, orderId: string, deps: PrintJobDeps): Promi
   const result = validateNewPrintJob(body);
   if (!result.ok) return invalid(result.errors);
 
-  const problems = await problemsNow(result.value, deps);
+  const [printers, spools, settings] = await Promise.all([deps.printers.list(), deps.spools.list(), currentCostSettings(deps.settings)]);
+  const problems = printJobProblems(result.value, printers, spools);
   if (problems) return invalid(problems);
 
-  const job = await deps.jobs.log(orderId, result.value);
+  const job = await deps.jobs.log(orderId, result.value, costNow(result.value, printers, spools, settings));
   if (!job) {
     // Another write (a log, a delete, an edit) landed after the check above and the guarded write refused: nothing
     // was written. Read again to say why.
