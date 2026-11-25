@@ -38,7 +38,7 @@ Deferred, not part of this feature: live printer status (needs a bridge on the w
 | ID | Task | Specs | Route | Commit |
 |---|---|---|---|---|
 | T1 | Printers and filament: schema, API, screens, nav entries | S1, S2 | worker | 96d3b20 (done) |
-| T2 | Clients: schema, migration of existing orders, API, screens, order form picker | S3 | worker | |
+| T2 | Clients: schema, migration of existing orders, API, screens, order form picker | S3 | worker | 96d8e3c (done) |
 | T3 | Cost settings and calculator | S4, S5 | worker | |
 | T4 | Quotes: save, print view, WhatsApp, accept into orders | S6 | worker | |
 | T5 | Print jobs on orders with real cost | S7 | worker | |
@@ -55,3 +55,4 @@ Order note: clients (T2) go before quotes (T4) because a quote needs a client re
 - **L2** (2026-11-25, decision): after the research report the owner chose "Sí, los 7 módulos en ese orden" for the proposed day-1 scope: Impresoras y Filamento; Calculadora + Presupuestos; Clientes; Servicio técnico; Proyectos; Calendario; Inicio. Deferred: live Bambu status, store sync, ARCA invoicing, customer upload portal.
 - **L3** (2026-11-25, evidence): research sources and the shared patterns are saved in Engram, topic `hola3d-app/market-research-modules`.
 - **L4** (2026-11-25, evidence): T1 done in 96d3b20. 75 tests pass, typecheck and lint clean; both screens checked in a browser at 1440 px and 390 px. Follow-ups folded into the conventions: phone navigation moves to a "Más" sheet (T2), and counter writes must be atomic (T5), because the T1 PUT handlers read then write every column.
+- **L5** (2026-11-25, evidence): T2 done in 96d8e3c. 112 tests pass, typecheck and lint clean; migration 0003 applied to the seeded local D1 with 0 unlinked orders; unknown `clientId` answers 422 against the running app; client page checked in a browser. Accepted limits: creating an order with a new client name is two writes, and two simultaneous creates with the same new name can duplicate a client (two-owner internal app). Open cosmetic item: the sidebar cloud decoration sits behind the middle nav items now that the list is longer.
