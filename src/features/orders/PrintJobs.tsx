@@ -119,6 +119,7 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
           orderId={order.id}
           finishing={finishing}
           onLogged={async (saved) => { onOrderChange(saved); setLogging(false); setFinishing(null); await load(); }}
+          onRefused={() => void load()}
           onCancel={() => { setLogging(false); setFinishing(null); }}
         />
       )}
@@ -238,11 +239,13 @@ function RealCostSummary({ price, cost }: { price: number; cost: RealCost | null
   );
 }
 
-function LogJobForm({ orderId, finishing, onLogged, onCancel }: {
+function LogJobForm({ orderId, finishing, onLogged, onRefused, onCancel }: {
   orderId: string;
   /** The planned job this form finishes; null to log a new one. */
   finishing: PrintJob | null;
   onLogged: (order: Order) => Promise<void>;
+  /** A save was refused: the list is read again, so an entry an earlier try already saved shows next to the message. */
+  onRefused: () => void;
   onCancel: () => void;
 }) {
   const uid = useId();
@@ -288,6 +291,7 @@ function LogJobForm({ orderId, finishing, onLogged, onCancel }: {
       setErrors(apiErr.fields ?? {});
       setBanner(apiErr.message);
       setSaving(false);
+      onRefused();
     }
   }
 

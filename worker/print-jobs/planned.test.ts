@@ -582,3 +582,42 @@ describe('review follow-ups: submission key after a refusal, job id high-water m
     expect((await memoryPrintJobRepository(t).plan('0143', plan))?.id).toBe(2);
   });
 });
+
+describe('review correction: a submission key answers only the same save', () => {
+  const key = 'clave-de-prueba-1';
+
+  it('refuses a finish whose key belongs to another job of the order and leaves that job planned', async () => {
+    const { call, snapshot } = setup({ printJobs: [logged, planned, { ...planned, id: 3 }] });
+    expect((await call('POST', '/api/orders/0143/jobs/2/finish', { ...finishBody, submissionKey: key })).status).toBe(200);
+    const before = await snapshot();
+    expect(await call('POST', '/api/orders/0143/jobs/3/finish', { ...finishBody, filaments: [{ spoolId: 1, grams: 10 }], submissionKey: key })).toEqual({
+      status: 409, body: { error: 'Esa clave de envío ya se usó para otra impresión de este pedido.' },
+    });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('refuses a retried finish that changed the data and writes nothing', async () => {
+    const { call, snapshot } = setup();
+    expect((await call('POST', '/api/orders/0143/jobs/2/finish', { ...finishBody, submissionKey: key })).status).toBe(200);
+    const before = await snapshot();
+    expect(await call('POST', '/api/orders/0143/jobs/2/finish', { ...finishBody, actualMinutes: 120, submissionKey: key })).toEqual({
+      status: 409, body: { error: 'La impresión 2 ya se había guardado con otros datos: revisala en la lista antes de cargarla de nuevo.' },
+    });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('refuses a retried log that changed the data and writes nothing', async () => {
+    const { call, snapshot } = setup();
+    const body = { printerId: 1, actualMinutes: 12, result: 'ok', filaments: [{ spoolId: 1, grams: 10 }], submissionKey: key };
+    const first = await call('POST', '/api/orders/0143/jobs', body);
+    expect(first.status).toBe(201);
+    const before = await snapshot();
+    const saved = (first.body as { job: { id: number } }).job.id;
+    expect(await call('POST', '/api/orders/0143/jobs', { ...body, filaments: [{ spoolId: 1, grams: 25 }] })).toEqual({
+      status: 409, body: { error: `La impresión ${saved} ya se había guardado con otros datos: revisala en la lista antes de cargarla de nuevo.` },
+    });
+    expect(await snapshot()).toEqual(before);
+    // The same data again is still answered with the saved job.
+    expect((await call('POST', '/api/orders/0143/jobs', body)).status).toBe(200);
+  });
+});

@@ -247,6 +247,17 @@ export function realCost(jobs: CostedJob[]): RealCost | null {
 }
 
 /** The order price minus its real cost. Null while the order has no real cost. */
+/** Whether a stored job holds exactly the data of a save request: what a retry of that same save would send. */
+export function sameEntry(
+  job: Pick<PrintJob, 'printerId' | 'actualMinutes' | 'result' | 'labourMinutes' | 'extraCost' | 'note'> & { filaments: { spoolId: number; grams: number }[] },
+  sent: NewPrintJob,
+): boolean {
+  const uses = (list: { spoolId: number; grams: number }[]) => list.map((f) => `${f.spoolId}:${f.grams}`).sort().join(',');
+  return job.printerId === sent.printerId && job.actualMinutes === sent.actualMinutes && job.result === sent.result
+    && job.labourMinutes === sent.labourMinutes && job.extraCost === sent.extraCost && job.note === sent.note
+    && uses(job.filaments) === uses(sent.filaments);
+}
+
 export function realProfit(price: number, cost: Pick<RealCost, 'total'> | null): number | null {
   return cost === null ? null : price - cost.total;
 }

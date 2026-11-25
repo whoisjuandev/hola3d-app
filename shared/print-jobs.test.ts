@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CostSettingsInput } from './cost-settings';
 import {
-  jobCost, planEditRefusal, printJobProblems, readSubmissionKey, realCost, realProfit, validateNewPrintJob, type CostedJob, type CostPrinter, type CostSpool, type JobCost, type JobCostInput,
+  jobCost, planEditRefusal, printJobProblems, readSubmissionKey, realCost, realProfit, sameEntry, validateNewPrintJob, type CostedJob, type CostPrinter, type CostSpool, type JobCost, type JobCostInput,
 } from './print-jobs';
 
 // Every cost at zero, so each test turns on only the term it checks.
@@ -240,5 +240,25 @@ describe('planEditRefusal', () => {
 
   it('has nothing to say while the job is still a planned job of the order', () => {
     expect(planEditRefusal('0143', 2, { orderId: '0143', status: 'planeada' })).toBeNull();
+  });
+});
+
+describe('sameEntry', () => {
+  const stored = { printerId: 1, actualMinutes: 90, result: 'ok' as const, labourMinutes: 10, extraCost: 500, note: 'Salió', filaments: [{ spoolId: 2, grams: 30 }, { spoolId: 1, grams: 5 }] };
+  const sent = { ...stored, filaments: [{ spoolId: 1, grams: 5 }, { spoolId: 2, grams: 30 }] };
+
+  it('matches the same data whatever the order of the filaments', () => {
+    expect(sameEntry(stored, sent)).toBe(true);
+  });
+
+  it('does not match when any field or any filament use differs', () => {
+    expect(sameEntry(stored, { ...sent, actualMinutes: 91 })).toBe(false);
+    expect(sameEntry(stored, { ...sent, printerId: 2 })).toBe(false);
+    expect(sameEntry(stored, { ...sent, result: 'fallida' })).toBe(false);
+    expect(sameEntry(stored, { ...sent, labourMinutes: 0 })).toBe(false);
+    expect(sameEntry(stored, { ...sent, extraCost: 0 })).toBe(false);
+    expect(sameEntry(stored, { ...sent, note: '' })).toBe(false);
+    expect(sameEntry(stored, { ...sent, filaments: [{ spoolId: 1, grams: 5 }] })).toBe(false);
+    expect(sameEntry(stored, { ...sent, filaments: [{ spoolId: 1, grams: 6 }, { spoolId: 2, grams: 30 }] })).toBe(false);
   });
 });
