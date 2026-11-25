@@ -1,5 +1,5 @@
 // The log-a-print-job form as the owners fill it in, and the API body it becomes.
-import type { PrintResult } from '../../../shared/print-jobs';
+import type { PrintJob, PrintResult } from '../../../shared/print-jobs';
 import { parseWhole } from '../../ui/forms';
 
 export interface JobDraft {
@@ -15,6 +15,13 @@ export interface JobDraft {
 
 export function emptyJobDraft(printerId: string): JobDraft {
   return { printerId, hours: '', minutes: '', filaments: [{ spoolId: '', grams: '' }], result: 'ok', labourMinutes: '', extraCost: '', note: '' };
+}
+
+/** The form that finishes a planned job: its printer, its estimated time as the time it took, and its note. */
+export function finishDraft(job: Pick<PrintJob, 'printerId' | 'estimatedMinutes' | 'note'>): JobDraft {
+  const minutes = job.estimatedMinutes ?? 0;
+  const time = minutes > 0 ? { hours: String(Math.floor(minutes / 60)), minutes: String(minutes % 60) } : {};
+  return { ...emptyJobDraft(String(job.printerId)), ...time, note: job.note };
 }
 
 /** Hours and minutes as whole minutes; an empty part counts as 0. Other text comes back as typed, for the API to reject. */

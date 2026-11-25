@@ -1,4 +1,5 @@
 import { workshopToday } from '../shared/service';
+import { handleCalendar } from './calendar/routes';
 import { handleClients } from './clients/routes';
 import { d1ClientRepository } from './clients/repository';
 import { problem } from './http';
@@ -42,6 +43,13 @@ const HANDLERS: Handler[] = [
   }),
   (request, url, env) => handlePrinters(request, url, d1PrinterRepository(env.DB), { service: d1ServiceRepository(env.DB), today }),
   (request, url, env) => handleService(request, url, { service: d1ServiceRepository(env.DB), printers: d1PrinterRepository(env.DB), today }),
+  (request, url, env) => handleCalendar(request, url, {
+    orders: d1OrderRepository(env.DB),
+    projects: d1ProjectRepository(env.DB),
+    service: d1ServiceRepository(env.DB),
+    jobs: d1PrintJobRepository(env.DB),
+    today,
+  }),
   (request, url, env) => handleSpools(request, url, d1SpoolRepository(env.DB)),
   (request, url, env) => handleCostSettings(request, url, d1CostSettingsRepository(env.DB)),
   (request, url, env) => handleQuotes(request, url, {

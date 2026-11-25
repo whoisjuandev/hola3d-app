@@ -12,9 +12,12 @@ import { fetchPrinters } from '../printers/api';
 import { durationLabel } from '../quotes/format';
 import { fetchSpools } from '../spools/api';
 import { grams } from '../spools/format';
-import { ApiError, deletePrintJob, fetchPrintJobs, logPrintJob } from './api';
+import { dayTitle, timeRange } from '../calendar/format';
+import { PlanJobDialog, type PlannedJobRef } from '../calendar/PlanJobDialog';
+import { addMinutes } from '../../../shared/calendar';
+import { ApiError, deletePrintJob, fetchPrintJobs, finishPrintJob, logPrintJob } from './api';
 import { money } from './format';
-import { emptyJobDraft, jobRequest, type JobDraft } from './job-form';
+import { emptyJobDraft, finishDraft, jobRequest, type JobDraft } from './job-form';
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
@@ -26,8 +29,9 @@ function dayLabel(iso: string): string {
 
 function ResultChip({ result }: { result: PrintResult | null }) {
   const failed = result === 'fallida';
+  const background = failed ? 'var(--red)' : result === null ? 'var(--yellow)' : 'var(--sky)';
   return (
-    <span className="chip" style={{ background: failed ? 'var(--red)' : 'var(--sky)', color: failed ? 'var(--white)' : 'var(--ink)' }}>
+    <span className="chip" style={{ background, color: failed ? 'var(--white)' : 'var(--ink)' }}>
       {result ? PRINT_RESULT_LABEL[result] : 'Planeada'}
     </span>
   );
@@ -38,6 +42,8 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
   const [cost, setCost] = useState<RealCost | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [logging, setLogging] = useState(false);
+  const [finishing, setFinishing] = useState<PrintJob | null>(null);
+  const [planning, setPlanning] = useState<PlannedJobRef | 'new' | null>(null);
   const [confirming, setConfirming] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -79,7 +85,12 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
     <section className="jobs" aria-labelledby={`jobs-${order.id}`}>
       <div className="jobs__head">
         <h3 id={`jobs-${order.id}`} className="jobs__title">Impresiones</h3>
-        {!logging && <button type="button" className="btn btn--sm" onClick={() => setLogging(true)}><Icon name="plus" size={16} />Cargar impresión</button>}
+        {!logging && (
+          <span className="jobs__actions">
+            <button type="button" className="btn btn--ghost btn--sm" onClick={() => setPlanning('new')}><Icon name="calendar" size={16} />Planificar impresión</button>
+            <button type="button" className="btn btn--sm" onClick={() => { setFinishing(null); setLogging(true); }}><Icon name="plus" size={16} />Cargar impresión</button>
+          </span>
+        )}
       </div>
 
       {error && <p className="field__error" role="alert">{error}</p>}
@@ -88,9 +99,11 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
 
       {logging && (
         <LogJobForm
+          key={finishing?.id ?? 'new'}
           orderId={order.id}
-          onLogged={async (saved) => { onOrderChange(saved); setLogging(false); await load(); }}
-          onCancel={() => setLogging(false)}
+          finishing={finishing}
+          onLogged={async (saved) => { onOrderChange(saved); setLogging(false); setFinishing(null); await load(); }}
+          onCancel={() => { setLogging(false); setFinishing(null); }}
         />
       )}
 
@@ -101,12 +114,12 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
       {jobs !== null && jobs.length > 0 && (
         <ul className="jobs__list">
           {jobs.map((job) => (
-            <li key={job.id} className="job">
+            <li key={job.id} className={job.status === 'planeada' ? 'job job--planned' : 'job'}>
               <div className="job__head">
-                <span className="job__meta"><ResultChip result={job.result} />{dayLabel(job.createdAt)}</span>
-                <b>{job.actualMinutes === null ? '—' : durationLabel(job.actualMinutes)}</b>
+                <span className="job__meta"><ResultChip result={job.result} />{job.status === 'planeada' ? planDay(job) : dayLabel(job.plannedStart === null ? job.createdAt : job.updatedAt)}</span>
+                <b>{job.actualMinutes === null ? `≈ ${durationLabel(job.estimatedMinutes ?? 0)}` : durationLabel(job.actualMinutes)}</b>
               </div>
-              <span className="job__printer"><Icon name="printer" size={16} />{job.printer}</span>
+              <span className="job__printer"><Icon name="printer" size={16} />{job.printer}{planText(job)}</span>
               <JobCostLine job={job} />
               <ul className="job__uses">
                 {job.filaments.map((f) => (
@@ -120,12 +133,22 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
               {job.note && <p className="job__note">{job.note}</p>}
               {confirming === job.id ? (
                 <div className="job__confirm" role="group" aria-label="Confirmar borrado">
-                  <span>¿La borramos? Vuelven {job.actualMinutes === null ? '' : `${durationLabel(job.actualMinutes)} a la impresora y `}los gramos a cada bobina.</span>
+                  <span>
+                    {job.status === 'planeada'
+                      ? '¿Borramos este plan? No cambia ningún contador.'
+                      : `¿La borramos? Vuelven ${job.actualMinutes === null ? '' : `${durationLabel(job.actualMinutes)} a la impresora y `}los gramos a cada bobina.`}
+                  </span>
                   <span className="job__confirm-actions">
                     <button type="button" className="btn btn--sm" disabled={busy} onClick={() => void remove(job.id)}>Sí, borrar</button>
                     <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => setConfirming(null)}>No</button>
                   </span>
                 </div>
+              ) : job.status === 'planeada' ? (
+                <span className="job__plan-actions">
+                  <button type="button" className="btn btn--sm" onClick={() => { setFinishing(job); setLogging(true); }}><Icon name="check" size={16} />Terminar</button>
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => setPlanning(job)}>Cambiar plan</button>
+                  <button type="button" className="job__delete" onClick={() => setConfirming(job.id)}>Borrar</button>
+                </span>
               ) : (
                 <button type="button" className="job__delete" onClick={() => setConfirming(job.id)}>Borrar</button>
               )}
@@ -133,8 +156,30 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
           ))}
         </ul>
       )}
+
+      {planning && (
+        <PlanJobDialog
+          job={planning === 'new' ? null : planning}
+          order={order}
+          onSaved={() => void load()}
+          onDeleted={(saved) => { onOrderChange(saved); void load(); }}
+          onClose={() => setPlanning(null)}
+        />
+      )}
     </section>
   );
+}
+
+/** "Jue 26 nov", the day a planned job starts. */
+function planDay(job: PrintJob): string {
+  return job.plannedStart ? dayTitle(job.plannedStart.slice(0, 10)) : '';
+}
+
+/** " · 09:00 – 17:00" for a planned job; " · estimado 2 h 40 min" for a finished one that was planned. */
+function planText(job: PrintJob): string {
+  if (job.plannedStart === null || job.estimatedMinutes === null) return '';
+  if (job.status === 'planeada') return ` · ${timeRange({ start: job.plannedStart, end: addMinutes(job.plannedStart, job.estimatedMinutes) })}`;
+  return ` · estimado ${durationLabel(job.estimatedMinutes)}`;
 }
 
 /** What the job cost when it was logged, with the labour and extras it carried. */
@@ -172,11 +217,17 @@ function RealCostSummary({ price, cost }: { price: number; cost: RealCost | null
   );
 }
 
-function LogJobForm({ orderId, onLogged, onCancel }: { orderId: string; onLogged: (order: Order) => Promise<void>; onCancel: () => void }) {
+function LogJobForm({ orderId, finishing, onLogged, onCancel }: {
+  orderId: string;
+  /** The planned job this form finishes; null to log a new one. */
+  finishing: PrintJob | null;
+  onLogged: (order: Order) => Promise<void>;
+  onCancel: () => void;
+}) {
   const uid = useId();
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [spools, setSpools] = useState<Spool[]>([]);
-  const [draft, setDraft] = useState<JobDraft>(emptyJobDraft(''));
+  const [draft, setDraft] = useState<JobDraft>(() => (finishing ? finishDraft(finishing) : emptyJobDraft('')));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [banner, setBanner] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -206,7 +257,8 @@ function LogJobForm({ orderId, onLogged, onCancel }: { orderId: string; onLogged
     setSaving(true);
     setBanner(null);
     try {
-      const { order } = await logPrintJob(orderId, jobRequest(draft));
+      const body = jobRequest(draft);
+      const { order } = finishing ? await finishPrintJob(orderId, finishing.id, body) : await logPrintJob(orderId, body);
       await onLogged(order);
     } catch (err) {
       const apiErr = err as ApiError;
@@ -221,7 +273,7 @@ function LogJobForm({ orderId, onLogged, onCancel }: { orderId: string; onLogged
 
   return (
     <form className="job-form" onSubmit={submit} noValidate aria-labelledby={`${uid}-title`}>
-      <h4 id={`${uid}-title`} className="job-form__title">Cargar una impresión terminada</h4>
+      <h4 id={`${uid}-title`} className="job-form__title">{finishing ? 'Terminar la impresión planeada' : 'Cargar una impresión terminada'}</h4>
       {banner && <p className="field__error" role="alert">{banner}</p>}
 
       <div className="field">

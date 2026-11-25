@@ -1,6 +1,7 @@
 import { spoolLabel } from '../../shared/calculator';
+import { addMinutes, overlappingJob, type PlannedJobInput } from '../../shared/calendar';
 import {
-  realCost, statusForResult, type CostedJob, type JobCost, type NewPrintJob, type PrintJob, type PrintJobStatus, type PrintResult, type RealCost,
+  NO_JOB_COST, realCost, statusForResult, type CostedJob, type JobCost, type NewPrintJob, type PrintJob, type PrintJobStatus, type PrintResult, type RealCost,
 } from '../../shared/print-jobs';
 import type { MemoryTables, StoredPrintJob } from '../memory';
 
@@ -22,6 +23,27 @@ export interface PrintJobRepository {
    * to each spool (never below 0 minutes or above a spool's net weight). False when the order has no such job.
    */
   remove(orderId: string, jobId: number): Promise<boolean>;
+  /** One job of any order, or null. */
+  get(jobId: number): Promise<PrintJob | null>;
+  /** Every planned job, by start. */
+  listPlanned(): Promise<PrintJob[]>;
+  /**
+   * Store a planned job for the order. It changes no counter and has no cost. Only while the order exists, the printer
+   * exists and is `activa`, and no planned job of that printer shares time with it; otherwise returns null having
+   * written nothing.
+   */
+  plan(orderId: string, plan: PlannedJobInput): Promise<PrintJob | null>;
+  /** Rewrite a planned job of the order, under the same conditions as `plan` (its own old span aside). Null otherwise. */
+  updatePlan(orderId: string, jobId: number, plan: PlannedJobInput): Promise<PrintJob | null>;
+  /** Delete a planned job of the order. It took nothing, so nothing is given back. False when there is no such job. */
+  removePlanned(orderId: string, jobId: number): Promise<boolean>;
+  /**
+   * In one atomic write, as `log` does for a new job: turn a planned job of the order into a finished one with its
+   * cost, store its grams per spool, add its minutes to the printer and take its grams off each spool. Only while the job
+   * is still planned and the order, the printer and every spool exist and every spool has enough grams left; otherwise
+   * returns null having written nothing. The plan (start and estimate) stays with the job.
+   */
+  finish(orderId: string, jobId: number, job: NewPrintJob, cost: JobCost): Promise<PrintJob | null>;
 }
 
 interface PrintJobRow {
@@ -103,6 +125,20 @@ const FILAMENTS = `SELECT f.job_id, f.spool_id, f.grams, s.material, s.color_nam
   FROM print_job_filaments f JOIN spools s ON s.id = f.spool_id JOIN print_jobs ON print_jobs.id = f.job_id`;
 const PRINTED = "print_jobs.status IN ('terminada', 'fallida')";
 
+/**
+ * The condition that no planned job of the printer, other than `exceptId`, shares a minute with the span from `start` to
+ * `end` (both YYYY-MM-DDTHH:MM on the same clock, so they compare as text). As `spansOverlap` in shared/calendar.ts.
+ */
+function freeSpan(printerId: number, start: string, end: string, exceptId: number): { sql: string; params: unknown[] } {
+  return {
+    sql: `NOT EXISTS (SELECT 1 FROM print_jobs other WHERE other.printer_id = ? AND other.status = 'planeada' AND other.id != ?
+      AND other.planned_start < ? AND strftime('%Y-%m-%dT%H:%M', other.planned_start, '+' || other.estimated_minutes || ' minutes') > ?)`,
+    params: [printerId, exceptId, end, start],
+  };
+}
+
+const ACTIVE_PRINTER = "EXISTS (SELECT 1 FROM printers WHERE id = ? AND status = 'activa')";
+
 interface CostRow extends CostColumns {
   order_id: string;
   status: string;
@@ -150,6 +186,7 @@ export function d1PrintJobRepository(db: D1Database): PrintJobRepository {
     ]);
     return jobs.results.map((row) => toPrintJob(row, filaments.results));
   };
+  const getJob = async (jobId: number) => (await read('print_jobs.id = ?', jobId))[0] ?? null;
 
   return {
     listByOrder(orderId) {
@@ -228,6 +265,94 @@ export function d1PrintJobRepository(db: D1Database): PrintJobRepository {
       ]);
       return (results.at(-1)?.results.length ?? 0) === 1;
     },
+
+    get: getJob,
+
+    async listPlanned() {
+      const jobs = await read('print_jobs.status = ?', 'planeada');
+      return jobs.sort((a, b) => (a.plannedStart ?? '').localeCompare(b.plannedStart ?? '') || a.id - b.id);
+    },
+
+    async plan(orderId, plan) {
+      const now = new Date().toISOString();
+      const free = freeSpan(plan.printerId, plan.plannedStart, addMinutes(plan.plannedStart, plan.estimatedMinutes), 0);
+      // One statement: the checks and the insert cannot be split by another write.
+      const row = await db
+        .prepare(
+          `INSERT INTO print_jobs (order_id, printer_id, status, planned_start, estimated_minutes, note, created_at, updated_at)
+           SELECT ?, ?, 'planeada', ?, ?, ?, ?, ?
+           WHERE EXISTS (SELECT 1 FROM orders WHERE id = ?) AND ${ACTIVE_PRINTER} AND ${free.sql}
+           RETURNING id`,
+        )
+        .bind(orderId, plan.printerId, plan.plannedStart, plan.estimatedMinutes, plan.note, now, now, orderId, plan.printerId, ...free.params)
+        .first<{ id: number }>();
+      return row ? getJob(row.id) : null;
+    },
+
+    async updatePlan(orderId, jobId, plan) {
+      const free = freeSpan(plan.printerId, plan.plannedStart, addMinutes(plan.plannedStart, plan.estimatedMinutes), jobId);
+      const row = await db
+        .prepare(
+          `UPDATE print_jobs SET printer_id = ?, planned_start = ?, estimated_minutes = ?, note = ?, updated_at = ?
+           WHERE id = ? AND order_id = ? AND status = 'planeada' AND ${ACTIVE_PRINTER} AND ${free.sql}
+           RETURNING id`,
+        )
+        .bind(plan.printerId, plan.plannedStart, plan.estimatedMinutes, plan.note, new Date().toISOString(), jobId, orderId, plan.printerId, ...free.params)
+        .first<{ id: number }>();
+      return row ? getJob(row.id) : null;
+    },
+
+    async removePlanned(orderId, jobId) {
+      const row = await db
+        .prepare("DELETE FROM print_jobs WHERE id = ? AND order_id = ? AND status = 'planeada' RETURNING id")
+        .bind(jobId, orderId)
+        .first<{ id: number }>();
+      return row !== null;
+    },
+
+    async finish(orderId, jobId, job, cost) {
+      const now = new Date().toISOString();
+      // The guard of `log`, plus: the job is still a planned job of this order. The statements that move the counters
+      // run while the job is still planned and repeat it; the spool update is the last one that reads the grams and its
+      // guard is evaluated once, before any row changes, as in `log`. The job's own update comes last: it changes the
+      // status the guard reads, so it checks instead that this batch stored the job's grams (a planned job has none),
+      // which happened only if the guard held. D1 runs a batch as one transaction: everything is written or nothing.
+      const guard = [
+        "EXISTS (SELECT 1 FROM print_jobs WHERE id = ? AND order_id = ? AND status = 'planeada')",
+        'EXISTS (SELECT 1 FROM orders WHERE id = ?)',
+        'EXISTS (SELECT 1 FROM printers WHERE id = ?)',
+        ...job.filaments.map(() => 'EXISTS (SELECT 1 FROM spools WHERE id = ? AND remaining_grams >= ?)'),
+      ].join(' AND ');
+      const guardParams = [jobId, orderId, orderId, job.printerId, ...job.filaments.flatMap((f) => [f.spoolId, f.grams])];
+
+      const results = await db.batch<{ id: number }>([
+        ...job.filaments.map((f) =>
+          db.prepare(`INSERT INTO print_job_filaments (job_id, spool_id, grams) SELECT ?, ?, ? WHERE ${guard}`).bind(jobId, f.spoolId, f.grams, ...guardParams),
+        ),
+        db
+          .prepare(`UPDATE printers SET print_minutes = print_minutes + ?, updated_at = ? WHERE id = ? AND ${guard}`)
+          .bind(job.actualMinutes, now, job.printerId, ...guardParams),
+        db
+          .prepare(
+            `UPDATE spools SET remaining_grams = remaining_grams - CASE id ${job.filaments.map(() => 'WHEN ? THEN ?').join(' ')} END, updated_at = ?
+             WHERE id IN (${job.filaments.map(() => '?').join(', ')}) AND ${guard}`,
+          )
+          .bind(...job.filaments.flatMap((f) => [f.spoolId, f.grams]), now, ...job.filaments.map((f) => f.spoolId), ...guardParams),
+        db
+          .prepare(
+            `UPDATE print_jobs SET printer_id = ?, status = ?, actual_minutes = ?, result = ?, labour_minutes = ?, extra_cost = ?,
+               cost_material = ?, cost_energy = ?, cost_machine_wear = ?, cost_fixed = ?, cost_labour = ?, cost_extra = ?, note = ?, updated_at = ?
+             WHERE id = ? AND order_id = ? AND status = 'planeada' AND EXISTS (SELECT 1 FROM print_job_filaments WHERE job_id = print_jobs.id)
+             RETURNING id`,
+          )
+          .bind(
+            job.printerId, statusForResult(job.result), job.actualMinutes, job.result, job.labourMinutes, job.extraCost,
+            cost.material, cost.energy, cost.machineWear, cost.fixedCosts, cost.labour, cost.extra, job.note, now, jobId, orderId,
+          ),
+      ]);
+      if (results.at(-1)?.results[0]?.id === undefined) return null;
+      return getJob(jobId);
+    },
   };
 }
 
@@ -291,6 +416,63 @@ export function memoryPrintJobRepository(tables: MemoryTables): PrintJobReposito
       }
       printJobs.delete(jobId);
       return true;
+    },
+    async get(jobId) {
+      const job = printJobs.get(jobId);
+      return job ? view(job) : null;
+    },
+    async listPlanned() {
+      return [...printJobs.values()]
+        .filter((j) => j.status === 'planeada')
+        .sort((a, b) => (a.plannedStart ?? '').localeCompare(b.plannedStart ?? '') || a.id - b.id)
+        .map(view);
+    },
+    async plan(orderId, plan) {
+      // No await in here, so nothing can run between the checks and the write.
+      if (!tables.orders.has(orderId) || printers.get(plan.printerId)?.status !== 'activa') return null;
+      if (overlappingJob(plan, [...printJobs.values()])) return null;
+      const now = new Date().toISOString();
+      const stored: StoredPrintJob = {
+        id: Math.max(0, ...printJobs.keys()) + 1, orderId, printerId: plan.printerId, status: 'planeada', result: null,
+        plannedStart: plan.plannedStart, estimatedMinutes: plan.estimatedMinutes, actualMinutes: null, labourMinutes: 0, extraCost: 0,
+        cost: { ...NO_JOB_COST }, note: plan.note, filaments: [], createdAt: now, updatedAt: now,
+      };
+      printJobs.set(stored.id, stored);
+      return view(stored);
+    },
+    async updatePlan(orderId, jobId, plan) {
+      const current = printJobs.get(jobId);
+      if (!current || current.orderId !== orderId || current.status !== 'planeada') return null;
+      if (printers.get(plan.printerId)?.status !== 'activa' || overlappingJob(plan, [...printJobs.values()], jobId)) return null;
+      const updated: StoredPrintJob = { ...current, ...plan, updatedAt: new Date().toISOString() };
+      printJobs.set(jobId, updated);
+      return view(updated);
+    },
+    async removePlanned(orderId, jobId) {
+      const job = printJobs.get(jobId);
+      if (!job || job.orderId !== orderId || job.status !== 'planeada') return false;
+      printJobs.delete(jobId);
+      return true;
+    },
+    async finish(orderId, jobId, job, cost) {
+      // No await in here, so nothing can run between the checks and the writes.
+      const current = printJobs.get(jobId);
+      const printer = printers.get(job.printerId);
+      const enough = job.filaments.every((f) => (spools.get(f.spoolId)?.remainingGrams ?? -1) >= f.grams);
+      if (!current || current.orderId !== orderId || current.status !== 'planeada' || !tables.orders.has(orderId) || !printer || !enough) return null;
+      const now = new Date().toISOString();
+      const finished: StoredPrintJob = {
+        ...current, printerId: job.printerId, status: statusForResult(job.result), result: job.result, actualMinutes: job.actualMinutes,
+        labourMinutes: job.labourMinutes, extraCost: job.extraCost, cost: { ...cost }, note: job.note,
+        filaments: job.filaments.map((f) => ({ ...f })), updatedAt: now,
+      };
+      printJobs.set(jobId, finished);
+      printers.set(printer.id, { ...printer, printMinutes: printer.printMinutes + job.actualMinutes, updatedAt: now });
+      for (const f of job.filaments) {
+        const spool = spools.get(f.spoolId);
+        if (spool) spools.set(spool.id, { ...spool, remainingGrams: spool.remainingGrams - f.grams, updatedAt: now });
+      }
+      return view(finished);
     },
   };
 }

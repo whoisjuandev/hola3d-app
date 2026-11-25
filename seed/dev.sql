@@ -1,4 +1,4 @@
--- Sample clients, projects, quotes, orders, printers, spools, print jobs, service tasks and logs, and cost settings for local
+-- Sample clients, projects, quotes, orders, printers, spools, print jobs (logged and planned), service tasks and logs, and cost settings for local
 -- development only (npm run db:seed). Never run against production. Contact details are made up.
 DELETE FROM service_logs;
 DELETE FROM service_tasks;
@@ -87,6 +87,17 @@ INSERT INTO print_jobs (id, order_id, printer_id, status, planned_start, estimat
 (3, '0141', 1, 'terminada', NULL, NULL, 270, 'ok', 0, 0, 3290, 92, 648, 3750, 0, 0, '', '2026-11-18T09:00:00Z', '2026-11-18T09:00:00Z'),
 (4, '0143', 2, 'terminada', NULL, NULL, 180, 'ok', 20, 900, 2233, 71, 320, 2500, 2333, 900, 'Embalada en caja.', '2026-11-17T12:00:00Z', '2026-11-17T12:00:00Z'),
 (5, '0142', 1, 'terminada', NULL, NULL, 156, 'ok', 30, 0, 1134, 53, 374, 2167, 3500, 0, 'Primera tanda: 6 de 12.', '2026-11-20T09:00:00Z', '2026-11-20T09:00:00Z');
+
+-- Planned jobs for the calendar, all on La A1 (the only active printer), none overlapping, in the week of 2026-11-25 and
+-- the next. A planned job has no outcome, no grams and no cost, and the counter updates below skip it.
+INSERT INTO print_jobs (id, order_id, printer_id, status, planned_start, estimated_minutes, actual_minutes, result, labour_minutes, extra_cost,
+  cost_material, cost_energy, cost_machine_wear, cost_fixed, cost_labour, cost_extra, note, created_at, updated_at) VALUES
+(6, '0142', 1, 'planeada', '2026-11-25T14:00', 160, NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 'Segunda tanda: los 6 llaveros que faltan.', '2026-11-20T09:30:00Z', '2026-11-20T09:30:00Z'),
+(7, '0144', 1, 'planeada', '2026-11-26T09:00', 480, NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 'Primera mitad de las piezas de robótica, en PETG.', '2026-11-24T12:00:00Z', '2026-11-24T12:00:00Z'),
+(8, '0145', 1, 'planeada', '2026-11-26T18:00', 300, NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 'De noche: soporte con el nombre en la base.', '2026-11-24T12:00:00Z', '2026-11-24T12:00:00Z'),
+(9, '0146', 1, 'planeada', '2026-11-27T10:00', 90, NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 'Dorado silk: alcanza justo.', '2026-11-24T12:00:00Z', '2026-11-24T12:00:00Z'),
+(10, '0144', 1, 'planeada', '2026-11-30T09:00', 480, NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 'Segunda mitad de las piezas de robótica.', '2026-11-24T12:00:00Z', '2026-11-24T12:00:00Z'),
+(11, '0144', 1, 'planeada', '2026-12-02T08:30', 240, NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 'Repuestos para los kits.', '2026-11-24T12:00:00Z', '2026-11-24T12:00:00Z');
 
 INSERT INTO print_job_filaments (id, job_id, spool_id, grams) VALUES
 (1, 1, 1, 25),

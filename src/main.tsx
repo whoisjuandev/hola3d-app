@@ -5,6 +5,7 @@ import '@fontsource/gochi-hand/400.css';
 import './index.css';
 import { AppShell } from './shell/AppShell';
 import { CalculatorPage } from './features/calculator/CalculatorPage';
+import { CalendarPage } from './features/calendar/CalendarPage';
 import { ClientPage } from './features/clients/ClientPage';
 import { ClientsPage } from './features/clients/ClientsPage';
 import { OrdersPage } from './features/orders/OrdersPage';
@@ -31,7 +32,7 @@ const router = createBrowserRouter([
       { path: 'presupuestos/:id', element: <QuotePage /> },
       { path: 'proyectos', element: <ProjectsPage /> },
       { path: 'proyectos/:id', element: <ProjectPage /> },
-      { path: 'agenda', element: <ComingSoon title="Agenda" /> },
+      { path: 'agenda', element: <CalendarPage /> },
       { path: 'taller', element: <ServicePage /> },
       { path: 'impresoras', element: <PrintersPage /> },
       { path: 'filamento', element: <SpoolsPage /> },

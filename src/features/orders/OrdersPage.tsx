@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { isActive, matchesSearch } from '../../../shared/orders';
 import { Icon } from '../../ui/Icon';
 import { PHONE_QUERY, useMediaQuery } from '../../ui/useMediaQuery';
@@ -12,7 +13,9 @@ export function OrdersPage() {
   const isPhone = useMediaQuery(PHONE_QUERY);
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<StageTab>('activos');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // `?pedido=0142` (from Calendario) opens that order's detail.
+  const [params, setParams] = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null>(() => params.get('pedido'));
   const [creating, setCreating] = useState(false);
   const [today] = useState(() => isoDate(new Date()));
 
@@ -20,7 +23,10 @@ export function OrdersPage() {
   const listed = isPhone ? found.filter((o) => (tab === 'activos' ? isActive(o) : o.stage === tab)) : found;
   const selected = orders.find((o) => o.id === selectedId) ?? null;
   const activeCount = orders.filter(isActive).length;
-  const close = useCallback(() => setSelectedId(null), []);
+  const close = useCallback(() => {
+    setSelectedId(null);
+    if (params.has('pedido')) setParams({}, { replace: true });
+  }, [params, setParams]);
 
   return (
     <div className={selected && !isPhone ? 'orders orders--with-detail' : 'orders'}>

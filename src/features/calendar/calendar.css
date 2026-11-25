@@ -1,0 +1,115 @@
+/* Calendario: month grid, week grid with a lane per printer, and the day list on a phone. */
+.calendar { display: flex; flex-direction: column; gap: 18px; }
+.calendar__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.calendar__tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.calendar__views { margin: 0; padding: 0; }
+.calendar__nav { display: flex; align-items: center; gap: 8px; }
+.calendar__body { transition: opacity 0.2s var(--out); }
+.calendar__body--stale { opacity: 0.5; }
+
+.calendar__legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; list-style: none; font-size: 13px; font-weight: 800; color: var(--soft); }
+.calendar__legend li { display: inline-flex; align-items: center; gap: 6px; }
+.cal-dot { flex: none; display: inline-block; width: 10px; height: 10px; border-radius: 999px; border: 2px solid var(--ink); }
+.cal-dot--order { background: var(--sky); }
+.cal-dot--project { background: var(--yellow); }
+.cal-dot--service { background: var(--white); }
+.cal-dot--job { background: var(--blue); }
+.cal-dot--late { background: var(--red); }
+
+/* ---- An item: a due order, project, service task or planned job ---- */
+.cal-item {
+  display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 4px 8px; border-radius: 8px;
+  border: 2px solid var(--ink); border-left-width: 5px; background: var(--card); color: var(--ink);
+  font: inherit; text-align: left; text-decoration: none; cursor: pointer;
+}
+.cal-item__label, .cal-item__detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-item__label { font-size: 13px; line-height: 17px; font-weight: 900; }
+.cal-item__detail { font-size: 12px; line-height: 15px; font-weight: 700; color: var(--soft); }
+.cal-item--order { border-left-color: var(--sky); background: var(--mist); }
+.cal-item--project { border-left-color: var(--yellow); background: var(--yellow-soft); }
+.cal-item--service { border-left-color: var(--ink); border-style: dashed; border-left-style: solid; }
+.cal-item--job { border-color: var(--blue); background: var(--blue); color: var(--white); }
+.cal-item--job .cal-item__detail { color: var(--rule); }
+.cal-item--late { border-color: var(--red); border-left-color: var(--red); }
+.cal-item--late .cal-item__detail { color: var(--red); }
+@media (hover: hover) { a.cal-item:hover, button.cal-item:hover { box-shadow: 0 3px 0 var(--ink); } }
+
+/* ---- Month ---- */
+.cal-month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.cal-month__weekday { padding: 0 4px; font-size: 13px; font-weight: 900; color: var(--soft); }
+.cal-month__day {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 118px; padding: 6px;
+  border-radius: 10px; border: 2px solid var(--rule); background: var(--card); color: var(--ink);
+  font: inherit; text-align: left; cursor: pointer;
+}
+@media (hover: hover) { .cal-month__day:hover { border-color: var(--ink); } }
+.cal-month__day--other { background: transparent; border-style: dashed; }
+.cal-month__day--other .cal-month__num { color: var(--faint); }
+.cal-month__day--today { border-color: var(--blue); box-shadow: inset 0 0 0 2px var(--blue); }
+.cal-month__num { font-size: 15px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.cal-month__day--today .cal-month__num { align-self: flex-start; padding: 0 7px; border-radius: 999px; background: var(--blue); color: var(--white); }
+.cal-month__items { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cal-month__items .cal-item { padding: 1px 6px; border-width: 1px; border-left-width: 4px; border-radius: 6px; cursor: inherit; }
+.cal-month__items .cal-item__label { font-size: 12px; line-height: 16px; }
+.cal-month__more { font-size: 12px; font-weight: 900; color: var(--blue); }
+.cal-month__dots { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+.cal-month__dots .cal-dot { width: 8px; height: 8px; border-width: 1px; }
+.cal-month__dots .cal-month__more { font-size: 11px; }
+
+/* ---- Week ---- */
+.cal-week { overflow-x: auto; }
+.cal-week__grid { display: grid; grid-template-columns: 132px repeat(7, minmax(108px, 1fr)); gap: 6px; min-width: 920px; }
+.cal-week__corner { display: block; }
+.cal-week__day { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 14px; font-weight: 900; }
+.cal-week__day--today { color: var(--blue); }
+.cal-week__today { padding: 1px 8px; border-radius: 999px; background: var(--blue); color: var(--white); font-size: 11px; }
+.cal-week__label { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 8px 4px; font-size: 13px; font-weight: 900; overflow-wrap: anywhere; }
+.cal-week__cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 96px; padding: 6px; border-radius: 10px; background: var(--card); border: 2px solid var(--rule); }
+.cal-week__cell--today { border-color: var(--blue); }
+.cal-week__lane { position: relative; grid-column: 2 / -1; min-height: 66px; }
+.cal-week__slots { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.cal-week__slot { border-radius: 10px; border: 2px dashed var(--rule); background: rgba(255, 253, 247, 0.6); cursor: copy; }
+.cal-week__slot:disabled { cursor: default; background: transparent; }
+@media (hover: hover) { .cal-week__slot:not(:disabled):hover { border-color: var(--blue); background: var(--mist); } }
+/* A planned job: a bar from its start to its end, and its label under it. The button itself lets clicks through. */
+.cal-job {
+  position: absolute; display: flex; flex-direction: column; gap: 3px; padding: 0; border: 0; background: none; color: var(--ink);
+  font: inherit; text-align: left; pointer-events: none;
+}
+.cal-job__bar, .cal-job__text { pointer-events: auto; cursor: pointer; }
+.cal-job__bar { display: block; min-width: 8px; height: 12px; border-radius: 999px; border: 2px solid var(--ink); background: var(--blue); }
+.cal-job__text { display: flex; flex-direction: column; min-width: 0; padding: 0 4px; border-radius: 6px; background: rgba(255, 253, 247, 0.92); }
+.cal-job__label, .cal-job__time { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-job__label { font-size: 12px; line-height: 15px; font-weight: 900; }
+.cal-job__time { font-size: 11px; line-height: 14px; font-weight: 700; color: var(--soft); }
+@media (hover: hover) { .cal-job:hover .cal-job__bar { box-shadow: 0 3px 0 var(--ink); } .cal-job:hover .cal-job__label { color: var(--blue); } }
+.cal-job:focus-visible { outline: none; }
+.cal-job:focus-visible .cal-job__bar { outline: 3px solid var(--blue); outline-offset: 2px; }
+
+/* ---- Phone: the week as a list of days ---- */
+.cal-days { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.cal-day { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 12px; background: var(--card); border: 2px solid var(--rule); }
+.cal-day--today { border-color: var(--blue); }
+.cal-day__title { font-size: 16px; }
+.cal-day__title .cal-week__day { padding: 0; }
+.cal-day__empty { font-size: 13px; font-weight: 700; color: var(--faint); }
+.cal-day .cal-item { padding: 8px 10px; }
+
+/* ---- Plan dialog ---- */
+.plan-form__duration { margin: 0; padding: 0; border: 0; }
+.plan-form__time { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.plan-form__unit { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 800; color: var(--soft); }
+.plan-form__unit .field__control { width: 100%; min-width: 0; }
+.plan-form__link { font-size: 14px; font-weight: 800; }
+.plan-form__delete { margin-right: auto; color: var(--red); }
+
+@media (max-width: 760px) {
+  .calendar { gap: 14px; }
+  .calendar__tools { width: 100%; justify-content: space-between; }
+  .cal-month { gap: 3px; }
+  .cal-month__weekday { padding: 0; text-align: center; font-size: 11px; }
+  .cal-month__day { min-height: 58px; padding: 4px; gap: 3px; border-radius: 8px; }
+  .cal-month__num { font-size: 13px; }
+  .form-dialog__actions { flex-wrap: wrap; }
+  .plan-form__delete { margin-right: 0; flex-basis: 100%; }
+}

@@ -50,6 +50,17 @@ describe('API dispatch', () => {
     expect(await get('/api/orders/0142/project')).toEqual({ status: 405, body: { error: 'Método no permitido.' } });
   });
 
+  it('sends calendar paths to the calendar module, and planned job paths to the print jobs module', async () => {
+    const { status, body } = await get('/api/calendar?from=2026-11-23&to=2026-11-29');
+    expect(status).toBe(200);
+    expect(body).toEqual({
+      from: '2026-11-23', to: '2026-11-29', today: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) as unknown as string,
+      orders: [], projects: [], serviceTasks: [], plannedJobs: [],
+    });
+    expect(await get('/api/orders/0142/jobs/plan')).toEqual({ status: 405, body: { error: 'Método no permitido.' } });
+    expect(await get('/api/orders/0142/jobs/3/finish')).toEqual({ status: 405, body: { error: 'Método no permitido.' } });
+  });
+
   it('answers 404 when no module owns the path', async () => {
     expect(await get('/api/nada')).toEqual({ status: 404, body: { error: 'Esa ruta no existe.' } });
   });

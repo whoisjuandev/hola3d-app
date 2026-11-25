@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { draftMinutes, jobRequest, type JobDraft } from './job-form';
+import { draftMinutes, emptyJobDraft, finishDraft, jobRequest, type JobDraft } from './job-form';
 
 describe('draftMinutes', () => {
   it('turns hours and minutes into whole minutes, an empty part counting as 0', () => {
@@ -40,5 +40,14 @@ describe('jobRequest', () => {
     expect(jobRequest({ ...draft, printerId: '', filaments: [{ spoolId: '3', grams: '' }] })).toMatchObject({
       printerId: null, filaments: [{ spoolId: 3, grams: null }],
     });
+  });
+});
+
+describe('finishDraft', () => {
+  it('starts the log form of a planned job with its printer, its estimated time and its note', () => {
+    expect(finishDraft({ printerId: 3, estimatedMinutes: 160, note: 'Segunda tanda' })).toEqual({
+      ...emptyJobDraft('3'), hours: '2', minutes: '40', note: 'Segunda tanda',
+    });
+    expect(finishDraft({ printerId: 1, estimatedMinutes: null, note: '' })).toEqual(emptyJobDraft('1'));
   });
 });

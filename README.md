@@ -8,7 +8,7 @@ The internal workshop app for Hola3D, a 3D printing shop. It tracks every order 
 
 | Section | State |
 |---|---|
-| Pedidos (orders) | Works end to end: board, search, new order (pick a client or type a new one, and optionally one of that client's active projects), stage moves. Cards show their project as a small label; the order detail shows the project with a link and changes or clears it. The order detail logs print jobs (printer, time, grams per spool, result, and optionally labour minutes and an extra cost); each job's cost is frozen when logged, and the detail shows the real cost in six terms and the real profit next to the price |
+| Pedidos (orders) | Works end to end: board, search, new order (pick a client or type a new one, and optionally one of that client's active projects), stage moves. Cards show their project as a small label; the order detail shows the project with a link and changes or clears it. The order detail logs print jobs (printer, time, grams per spool, result, and optionally labour minutes and an extra cost); each job's cost is frozen when logged, and the detail shows the real cost in six terms and the real profit next to the price. It also plans prints (printer, day, time, duration), changes or deletes a plan, and finishes a planned print with the log form prefilled with its printer and estimated time. `/pedidos?pedido=0142` opens that order's detail |
 | Clientes (clients) | List with search, create and edit. Client page with contact links, orders, projects, total spent and balance owed |
 | Proyectos (projects) | List with an active/finished filter: client, due date (overdue when past and still active), progress and totals. Create and edit with the client picker. Project page with its orders and their stages, progress (delivered ÷ all orders), price, deposits and balance; add an order of that client that has no project, take one out, mark the project finished or reopen it |
 | Impresoras (printers) | List, create and edit. Shows accumulated print hours and machine wear per print hour; logged print jobs add their hours. A new printer comes with the default service plan unless unticked; each card shows a badge with its service tasks due (it links to Servicio técnico), or offers the plan when it has none |
@@ -16,7 +16,8 @@ The internal workshop app for Hola3D, a 3D printing shop. It tracks every order 
 | Filamento (spools) | List, create and edit. Filter by material, total stock in grams, low-stock warning; logged print jobs take their grams off |
 | Calculadora (calculator) | Prices one or more pieces with the real cost breakdown, total and price per unit, live. Edits the workshop costs. Saves the calculation as a quote for a client |
 | Presupuestos (quotes) | List with status filter and totals. Quote page with the frozen lines and breakdown; mark sent, accept into orders, reject, print view for PDF, WhatsApp message. Client pages list their quotes; orders link back to their quote |
-| Inicio, Calendario | Placeholder screens |
+| Calendario (calendar) | Month and week views with previous, next and "Hoy". The month shows each day's due orders, project due dates, service tasks due by date and planned prints as small labels by type (with "+N más" when they do not fit); a day opens its week. The week shows due orders (late ones in red), projects and service at the top, and below one row per active printer with its planned prints placed by start time and length; a day of a printer's row plans a print there, and a print opens its plan to change or delete it. Orders open their detail in Pedidos, projects their page, service tasks Servicio técnico. On a phone the week is a list of days |
+| Inicio | Placeholder screen |
 | Deploy to `app.hola3d.com.ar` | Not done yet, see [Deploy](#deploy) |
 
 The app has no login of its own. It is meant to run behind Cloudflare Access, so do not deploy it without that step.
@@ -28,7 +29,7 @@ You need Node.js 22 or newer. Nothing here touches a Cloudflare account: the dat
 ```bash
 npm install
 npm run db:migrate   # create the local D1 tables
-npm run db:seed      # load sample clients, projects, quotes, orders, printers, spools, print jobs, service tasks and logs, and cost settings
+npm run db:seed      # load sample clients, projects, quotes, orders, printers, spools, print jobs (logged and planned), service tasks and logs, and cost settings
 npm run dev
 ```
 
@@ -48,11 +49,11 @@ One Cloudflare Worker serves both the React app and the API, and stores data in 
 
 | Folder | What lives there |
 |---|---|
-| `src/` | React 19 app (Vite, React Router). One folder per screen in `features/` (`orders/` is Pedidos, `clients/` Clientes, `printers/` Impresoras, `spools/` Filamento, `calculator/` Calculadora, `quotes/` Presupuestos and the quote print view, `service/` Servicio técnico, `projects/` Proyectos and the project page), `shell/` the navigation, `ui/` pieces the screens share (API calls, form dialog, icons) |
-| `worker/` | The Worker: API under `/api/*`, everything else is the single-page app. One folder per module (`orders/`, `print-jobs/`, `clients/`, `projects/`, `printers/`, `spools/`, `settings/`, `quotes/`, `service/`) with its routes and a storage port with a D1 and an in-memory adapter (the in-memory adapters share tables, `memory.ts`, where they read each other's rows); `index.ts` tries each module in turn |
-| `shared/` | Rules used by both sides: order stages, validation and search; client validation, name matching, total spent, balance owed and contact links; printer validation, hours and wear cost; spool validation, low stock, material filter and stock totals; cost settings validation and defaults; the cost formula and spool shortages for the calculator; quote validation, status rules, the orders a quote becomes and its WhatsApp message; print job validation, the cost of one job and the real cost of an order from its jobs' stored costs; service task and log validation, when a task is due and how much is left, the due-first order, the default plan and the service cost per printer; project validation, progress, totals, when a project is overdue and the one-client rule for its orders |
+| `src/` | React 19 app (Vite, React Router). One folder per screen in `features/` (`orders/` is Pedidos, `clients/` Clientes, `printers/` Impresoras, `spools/` Filamento, `calculator/` Calculadora, `quotes/` Presupuestos and the quote print view, `service/` Servicio técnico, `projects/` Proyectos and the project page, `calendar/` Calendario and the plan-a-print dialog), `shell/` the navigation, `ui/` pieces the screens share (API calls, form dialog, icons) |
+| `worker/` | The Worker: API under `/api/*`, everything else is the single-page app. One folder per module (`orders/`, `print-jobs/` (logged and planned jobs), `calendar/` (reads the other modules' ports, no storage of its own), `clients/`, `projects/`, `printers/`, `spools/`, `settings/`, `quotes/`, `service/`) with its routes and a storage port with a D1 and an in-memory adapter (the in-memory adapters share tables, `memory.ts`, where they read each other's rows); `index.ts` tries each module in turn |
+| `shared/` | Rules used by both sides: order stages, validation and search; client validation, name matching, total spent, balance owed and contact links; printer validation, hours and wear cost; spool validation, low stock, material filter and stock totals; cost settings validation and defaults; the cost formula and spool shortages for the calculator; quote validation, status rules, the orders a quote becomes and its WhatsApp message; print job validation, the cost of one job and the real cost of an order from its jobs' stored costs; service task and log validation, when a task is due and how much is left, the due-first order, the default plan and the service cost per printer; project validation, progress, totals, when a project is overdue and the one-client rule for its orders; the calendar's dates, ranges, overlap of planned prints, when a service task is due by date, and what falls in a range |
 | `migrations/` | D1 schema, one file per change |
-| `seed/` | Sample clients, projects, quotes, orders, printers, spools, print jobs, service tasks and logs, and cost settings, for local use only |
+| `seed/` | Sample clients, projects, quotes, orders, printers, spools, print jobs (logged, and planned in this week and the next), service tasks and logs, and cost settings, for local use only |
 
 An order moves through five stages, in order:
 
@@ -68,7 +69,11 @@ An order moves through five stages, in order:
 | PUT | `/api/orders/:id/project` | Put the order in a project of its client with `{"projectId": 3}`, or take it out of any with `{"projectId": null}` |
 | GET | `/api/orders/:id/jobs` | The order's print jobs, oldest first, each with its stored `cost`, and `cost`: the order's real cost term by term (null without jobs) |
 | POST | `/api/orders/:id/jobs` | Log a finished print job: store it with its cost, add its minutes to the printer and take its grams off each spool, in one atomic write. Answers the job and the order |
-| DELETE | `/api/orders/:id/jobs/:jobId` | Delete a logged job and give its minutes and grams back, in one atomic write. Answers the order |
+| DELETE | `/api/orders/:id/jobs/:jobId` | Delete a logged job and give its minutes and grams back, in one atomic write; or delete a planned job, which gives nothing back. Answers the order |
+| POST | `/api/orders/:id/jobs/plan` | Plan a job: `printerId`, `plannedStart` and `estimatedMinutes`. Changes no counter and has no cost. Answers the job |
+| PUT | `/api/orders/:id/jobs/:jobId` | Change a planned job's `printerId`, `plannedStart`, `estimatedMinutes` or `note`. Send only the fields to change. 409 for a finished job |
+| POST | `/api/orders/:id/jobs/:jobId/finish` | Finish a planned job with the body of a log: store its cost, add its minutes and take its grams off, in one atomic write. Answers the job and the order; 409 once it is finished |
+| GET | `/api/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD` | For those days (both included, up to 92): `orders` due (with stage, client, project and `overdue`), `projects` due, `serviceTasks` that become due by date, and `plannedJobs` with printer, order, `start` and `end`; and `today` |
 | GET | `/api/clients` | List clients, by name, each with `orderCount`, `totalSpent` and `balanceOwed` |
 | POST | `/api/clients` | Create a client |
 | GET | `/api/clients/:id` | One client with its totals, and its `orders` |
@@ -184,9 +189,11 @@ curl -X POST http://localhost:5173/api/quotes/2/accept \
   -d '{"channel":"Instagram"}'
 ```
 
-A print job belongs to an order. Logging one needs `printerId`, `actualMinutes` (whole minutes, more than 0), `result` (`ok` or `fallida`) and `filaments`, one to 16 spools each with whole `grams` above 0 (`[{"spoolId":1,"grams":36}]`); `note`, `labourMinutes` (preparation and post-processing actually spent, whole minutes from 0) and `extraCost` (packaging and other supplies, whole pesos from 0) are optional, and the last two default to 0. A wrong `labourMinutes` or `extraCost` answers 422 on that field. It answers 422 and changes nothing when the printer or a spool does not exist, when a spool appears twice, or when a spool has fewer grams left than the job used. The job, its grams per spool, the printer's minutes and every spool's grams are written in one D1 batch whose statements all repeat the same check, so two logs at the same time can never take a spool below 0 g. A job with result `ok` is stored as `terminada`, a failed one as `fallida`; the table also has `planeada`, `planned_start` and `estimated_minutes` for planning jobs on the calendar later. Deleting a job takes its minutes off the printer (not below 0) and gives its grams back to each spool (not above the net weight), also in one batch. Editing a printer or a spool writes only the fields sent, so an edit never overwrites the counters a job changed in between.
+A print job belongs to an order. Logging one needs `printerId`, `actualMinutes` (whole minutes, more than 0), `result` (`ok` or `fallida`) and `filaments`, one to 16 spools each with whole `grams` above 0 (`[{"spoolId":1,"grams":36}]`); `note`, `labourMinutes` (preparation and post-processing actually spent, whole minutes from 0) and `extraCost` (packaging and other supplies, whole pesos from 0) are optional, and the last two default to 0. A wrong `labourMinutes` or `extraCost` answers 422 on that field. It answers 422 and changes nothing when the printer or a spool does not exist, when a spool appears twice, or when a spool has fewer grams left than the job used. The job, its grams per spool, the printer's minutes and every spool's grams are written in one D1 batch whose statements all repeat the same check, so two logs at the same time can never take a spool below 0 g. A job with result `ok` is stored as `terminada`, a failed one as `fallida`. Deleting a job takes its minutes off the printer (not below 0) and gives its grams back to each spool (not above the net weight), also in one batch. Editing a printer or a spool writes only the fields sent, so an edit never overwrites the counters a job changed in between.
 
 The cost of a job is worked out once, when it is logged, with the printer, spool prices and cost settings of that moment, and stored with the job in six terms, each in whole pesos: material, energy, machine wear and fixed costs as in the calculator, from the actual grams and minutes; labour = labour minutes ÷ 60 × the hourly rate; and the extra cost as logged. Later changes to prices or settings never change it. Migration `0007` added these columns and froze the jobs logged before it with the prices and settings of the moment it ran. The real cost of an order is the sum of the stored terms of all its jobs, failed ones included; it has no failure allowance, because failures are counted for real. Real profit is the order's price minus its real cost; it can be negative. The formulas are `jobCost` (one job, used when logging) and `realCost` (an order, from the stored costs, used on every read) in `shared/print-jobs.ts`.
+
+A job can also be planned before it prints, as `planeada`: it needs `printerId`, `plannedStart` (`YYYY-MM-DDTHH:MM`, on the workshop's clock) and `estimatedMinutes` (whole minutes above 0, up to 168 h); `note` is optional. Planning answers 422 and stores nothing when the printer does not exist, is not `activa`, or already has a planned job that shares any minute with this one (back to back is fine); the insert repeats that check in the same SQL statement, so two plans at once cannot take the same time. Editing a plan follows the same rules, apart from the job's own old time. A planned job changes no counter and costs nothing: it never counts in an order's real cost, a printer's minutes or a spool's grams. Finishing it takes the same body as logging a job (the printer defaults to the planned one and the note to the plan's) and is one D1 batch with the log's guard plus "the job is still planned": it stores the grams, adds the minutes, takes the grams off and, last, turns the job into `terminada` or `fallida` with its frozen cost, keeping its plan next to the real time. A rejected finish leaves the planned job and the counters as they were; a second finish answers 409.
 
 ```bash
 # Log 2 h 36 min on printer 1 for order 0142, with 36 g of spool 1 and 18 g of spool 2, 30 min of labour and $900 of packaging
@@ -211,10 +218,27 @@ Errors come back as JSON with an `error` message in Spanish, since the app shows
 | Status | When |
 |---|---|
 | 400 | The body is not JSON (for an edit, not a JSON object) |
-| 404 | The order, client, project, printer, spool, quote, print job, service task or route does not exist |
+| 404 | The order, client, project, printer, spool, quote, print job (of that order), service task or route does not exist |
 | 405 | The method is not allowed on that path |
-| 409 | The quote was already accepted, or is rejected, so it cannot be accepted or change status; or the printer already has service tasks, so the default plan is not added; or a project changed client between the checks and the write of an order's project |
+| 409 | The quote was already accepted, or is rejected, so it cannot be accepted or change status; or the printer already has service tasks, so the default plan is not added; or a project changed client between the checks and the write of an order's project; or a print job is already finished, so it cannot be finished again or replanned |
 | 422 | The data is missing or invalid (the answer adds `fields`, one message per field), or the stage does not exist |
+
+### Calendar
+
+`GET /api/calendar` reads the orders, projects, service tasks and planned jobs and keeps, for the range: orders with a due date in it (late when not delivered and before today), projects with a due date in it (late when active and before today), active service tasks with a day interval whose due date (last done + interval days) falls in it, and planned jobs with any minute in it (a job that started the day before and runs past midnight counts). "Today" is the Buenos Aires date, as for service tasks, and planned times are local workshop times with no time zone. The screen asks for the six weeks a month shows, or one week from Monday. The rules are in `shared/calendar.ts` (`validateCalendarRange`, `spansOverlap`, `planProblems`, `serviceDueDate`, `calendarData`).
+
+```bash
+# Plan 3 h on La A1 for order 0143 on Saturday; finish the seed's planned job 6 of order 0142 with what it really took
+curl -X POST http://localhost:5173/api/orders/0143/jobs/plan \
+  -H 'content-type: application/json' \
+  -d '{"printerId":1,"plannedStart":"2026-11-28T15:30","estimatedMinutes":180}'
+curl -X POST http://localhost:5173/api/orders/0142/jobs/6/finish \
+  -H 'content-type: application/json' \
+  -d '{"actualMinutes":170,"result":"ok","filaments":[{"spoolId":1,"grams":36},{"spoolId":2,"grams":18}]}'
+
+# What falls in the week of 23 November
+curl 'http://localhost:5173/api/calendar?from=2026-11-23&to=2026-11-29'
+```
 
 ## Deploy
 

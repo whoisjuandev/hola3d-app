@@ -32,3 +32,18 @@ export async function logPrintJob(orderId: string, input: Record<string, unknown
 export async function deletePrintJob(orderId: string, jobId: number): Promise<Order> {
   return (await request<{ order: Order }>(`/api/orders/${orderId}/jobs/${jobId}`, { method: 'DELETE' })).order;
 }
+
+/** Plan a job for the order: printer, start and estimated minutes. It changes no counter. */
+export async function planPrintJob(orderId: string, input: Record<string, unknown>): Promise<PrintJob> {
+  return (await request<{ job: PrintJob }>(`/api/orders/${orderId}/jobs/plan`, { method: 'POST', body: JSON.stringify(input) })).job;
+}
+
+/** Change a planned job. Send only the fields to change. */
+export async function updatePlannedJob(orderId: string, jobId: number, changes: Record<string, unknown>): Promise<PrintJob> {
+  return (await request<{ job: PrintJob }>(`/api/orders/${orderId}/jobs/${jobId}`, { method: 'PUT', body: JSON.stringify(changes) })).job;
+}
+
+/** Turn a planned job into a finished one, with the same body as logging one. Answers the job and the order. */
+export async function finishPrintJob(orderId: string, jobId: number, input: Record<string, unknown>): Promise<{ job: PrintJob; order: Order }> {
+  return request<{ job: PrintJob; order: Order }>(`/api/orders/${orderId}/jobs/${jobId}/finish`, { method: 'POST', body: JSON.stringify(input) });
+}

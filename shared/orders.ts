@@ -76,6 +76,11 @@ export function isActive(order: Pick<Order, 'stage'>): boolean {
   return order.stage !== 'entregado';
 }
 
+/** An order not delivered yet whose due date (YYYY-MM-DD) is before `today`. */
+export function isOrderOverdue(order: Pick<Order, 'dueDate' | 'stage'>, today: string): boolean {
+  return !!order.dueDate && isActive(order) && order.dueDate < today;
+}
+
 /** Lowercase, strip accents and the leading "#", so "Lucía" matches "lucia" and "#0142" matches "0142". */
 export function normalizeSearch(text: string): string {
   return text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/#/g, '').trim();

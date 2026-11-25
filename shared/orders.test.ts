@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchesSearch, nextStage, previousStage, validateNewOrder, formatOrderNumber, isActive } from './orders';
+import { matchesSearch, nextStage, previousStage, validateNewOrder, formatOrderNumber, isActive, isOrderOverdue } from './orders';
 
 const order = { id: '0143', client: 'Lucía M.', item: 'Maceta geométrica' };
 
@@ -17,6 +17,15 @@ describe('stage moves', () => {
   it('counts every stage but entregado as active', () => {
     expect(isActive({ stage: 'listo' })).toBe(true);
     expect(isActive({ stage: 'entregado' })).toBe(false);
+  });
+});
+
+describe('isOrderOverdue', () => {
+  it('is an order not delivered whose due date is before today', () => {
+    expect(isOrderOverdue({ dueDate: '2026-11-24', stage: 'listo' }, '2026-11-25')).toBe(true);
+    expect(isOrderOverdue({ dueDate: '2026-11-25', stage: 'listo' }, '2026-11-25')).toBe(false);
+    expect(isOrderOverdue({ dueDate: '2026-11-24', stage: 'entregado' }, '2026-11-25')).toBe(false);
+    expect(isOrderOverdue({ dueDate: null, stage: 'nuevo' }, '2026-11-25')).toBe(false);
   });
 });
 

@@ -30,9 +30,8 @@ export function dueLabel(order: Pick<Order, 'dueDate' | 'dueTime' | 'stage'>, to
   return order.dueTime ? `${label}, ${order.dueTime}` : label;
 }
 
-export function isOverdue(order: Pick<Order, 'dueDate' | 'stage'>, today: string): boolean {
-  return !!order.dueDate && order.stage !== 'entregado' && order.dueDate < today;
-}
+/** The shared rule, under the name the screens use. */
+export { isOrderOverdue as isOverdue } from '../../../shared/orders';
 
 export function depositLabel(order: Pick<Order, 'deposit' | 'paid'>): string {
   if (order.paid) return 'Pagado';
