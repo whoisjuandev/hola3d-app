@@ -9,15 +9,16 @@ import type { MemoryTables, StoredPrintJob } from '../memory';
 export interface PrintJobRepository {
   /** The order's jobs, oldest first, with printer and spool names read through them. */
   listByOrder(orderId: string): Promise<PrintJob[]>;
-  /** The order's real cost from the stored costs of its printed jobs, or null while it has none. */
-  costOf(orderId: string): Promise<RealCost | null>;
   /**
    * In one atomic write: store the finished job with its cost and its grams per spool, add its minutes to the
    * printer and take its grams off each spool. Only while the order, the printer and every spool exist and every
    * spool has enough grams left; otherwise returns null having written nothing. Each spool appears once in
-   * `job.filaments`. `cost` is the job's cost worked out by the caller with the prices and settings of now.
+   * `job.filaments`. `cost` is the job's cost worked out by the caller with the prices and settings of now. With a
+   * `submissionKey`, the job carries it, and only while no job carries it yet (null otherwise, having written nothing).
    */
-  log(orderId: string, job: NewPrintJob, cost: JobCost): Promise<PrintJob | null>;
+  log(orderId: string, job: NewPrintJob, cost: JobCost, submissionKey?: string | null): Promise<PrintJob | null>;
+  /** The job that carries this submission key, of any order, or null. */
+  bySubmission(submissionKey: string): Promise<PrintJob | null>;
   /**
    * In one atomic write: delete a printed job of the order, take its minutes off the printer and give its grams back
    * to each spool (never below 0 minutes or above a spool's net weight). False when the order has no such job.
@@ -49,9 +50,10 @@ export interface PrintJobRepository {
    * cost, store its grams per spool, add its minutes to the printer (`job.printerId`, which may differ from the planned
    * one) and take its grams off each spool. Only while the job is still planned on `plannedPrinterId` (the printer the
    * caller read) and the order, the printer and every spool exist and every spool has enough grams left; otherwise
-   * returns null having written nothing. The plan (start and estimate) stays with the job.
+   * returns null having written nothing. The plan (start and estimate) stays with the job. With a `submissionKey`, as
+   * in `log`: the job carries it, and only while no job carries it yet.
    */
-  finish(orderId: string, jobId: number, plannedPrinterId: number, job: NewPrintJob, cost: JobCost): Promise<PrintJob | null>;
+  finish(orderId: string, jobId: number, plannedPrinterId: number, job: NewPrintJob, cost: JobCost, submissionKey?: string | null): Promise<PrintJob | null>;
 }
 
 interface PrintJobRow {
@@ -147,6 +149,11 @@ function freeSpan(printerId: number, start: string, end: string, exceptId: numbe
 
 const ACTIVE_PRINTER = "EXISTS (SELECT 1 FROM printers WHERE id = ? AND status = 'activa')";
 
+/** The unique index on `print_jobs.submission_key` refused a write: another save with the same key got there first. */
+function isSubmissionKeyTaken(error: unknown): boolean {
+  return error instanceof Error && /UNIQUE constraint failed: print_jobs\.submission_key/.test(error.message);
+}
+
 const PLAN_COLUMNS = { printerId: 'printer_id', plannedStart: 'planned_start', estimatedMinutes: 'estimated_minutes', note: 'note' } as const;
 const PLAN_KEYS = Object.keys(PLAN_COLUMNS) as (keyof PlannedJobInput)[];
 
@@ -204,34 +211,34 @@ export function d1PrintJobRepository(db: D1Database): PrintJobRepository {
       return read('print_jobs.order_id = ?', orderId);
     },
 
-    async costOf(orderId) {
-      return (await d1RealCosts(db, [orderId])).get(orderId) ?? null;
-    },
-
-    async log(orderId, job, cost) {
+    async log(orderId, job, cost, submissionKey = null) {
       const now = new Date().toISOString();
       // Every statement repeats the same guard: the order, printer and spools exist and each spool has enough grams.
       // Nothing in the batch changes what the guard reads until the last statement, which takes the grams off all the
       // spools at once; the guard there is not correlated to the row, so SQLite evaluates it once, before any row
       // changes. D1 runs a batch as one transaction, so either everything is written or nothing is.
+      // The submission key (none matches a NULL one): no job but the newest carries it. After the insert the newest is
+      // this batch's own job, so the later statements still apply; before it, a newest job that already carries the key
+      // makes the unique index refuse the insert, and D1 rolls the whole batch back.
       const guard = [
         'EXISTS (SELECT 1 FROM orders WHERE id = ?)',
         'EXISTS (SELECT 1 FROM printers WHERE id = ?)',
         ...job.filaments.map(() => 'EXISTS (SELECT 1 FROM spools WHERE id = ? AND remaining_grams >= ?)'),
+        'NOT EXISTS (SELECT 1 FROM print_jobs WHERE submission_key = ? AND id != (SELECT MAX(id) FROM print_jobs))',
       ].join(' AND ');
-      const guardParams = [orderId, job.printerId, ...job.filaments.flatMap((f) => [f.spoolId, f.grams])];
+      const guardParams = [orderId, job.printerId, ...job.filaments.flatMap((f) => [f.spoolId, f.grams]), submissionKey];
 
       const results = await db.batch<{ id: number }>([
         db
           .prepare(
             `INSERT INTO print_jobs (order_id, printer_id, status, actual_minutes, result, labour_minutes, extra_cost,
-               cost_material, cost_energy, cost_machine_wear, cost_fixed, cost_labour, cost_extra, note, created_at, updated_at)
-             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${guard}
+               cost_material, cost_energy, cost_machine_wear, cost_fixed, cost_labour, cost_extra, note, created_at, updated_at, submission_key)
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${guard}
              RETURNING id`,
           )
           .bind(
             orderId, job.printerId, statusForResult(job.result), job.actualMinutes, job.result, job.labourMinutes, job.extraCost,
-            cost.material, cost.energy, cost.machineWear, cost.fixedCosts, cost.labour, cost.extra, job.note, now, now, ...guardParams,
+            cost.material, cost.energy, cost.machineWear, cost.fixedCosts, cost.labour, cost.extra, job.note, now, now, submissionKey, ...guardParams,
           ),
         // AUTOINCREMENT ids only grow, so inside this transaction the highest id is the job just inserted.
         ...job.filaments.map((f) =>
@@ -248,10 +255,18 @@ export function d1PrintJobRepository(db: D1Database): PrintJobRepository {
              WHERE id IN (${job.filaments.map(() => '?').join(', ')}) AND ${guard}`,
           )
           .bind(...job.filaments.flatMap((f) => [f.spoolId, f.grams]), now, ...job.filaments.map((f) => f.spoolId), ...guardParams),
-      ]);
-      const id = results[0]?.results[0]?.id;
+      ]).catch((error: unknown) => {
+        // Another save with this key was the newest job: the unique index refused the insert and nothing was written.
+        if (isSubmissionKeyTaken(error)) return null;
+        throw error;
+      });
+      const id = results?.[0]?.results[0]?.id;
       if (id === undefined) return null;
       return (await read('print_jobs.id = ?', id))[0] ?? null;
+    },
+
+    async bySubmission(submissionKey) {
+      return (await read('print_jobs.submission_key = ?', submissionKey))[0] ?? null;
     },
 
     async remove(orderId, jobId) {
@@ -336,7 +351,7 @@ export function d1PrintJobRepository(db: D1Database): PrintJobRepository {
       return row !== null;
     },
 
-    async finish(orderId, jobId, plannedPrinterId, job, cost) {
+    async finish(orderId, jobId, plannedPrinterId, job, cost, submissionKey = null) {
       const now = new Date().toISOString();
       // A value made for this request only: the job carries it once this batch's first statement has applied.
       const token = crypto.randomUUID();
@@ -357,14 +372,15 @@ export function d1PrintJobRepository(db: D1Database): PrintJobRepository {
           .prepare(
             `UPDATE print_jobs SET printer_id = ?, status = ?, actual_minutes = ?, result = ?, labour_minutes = ?, extra_cost = ?,
                cost_material = ?, cost_energy = ?, cost_machine_wear = ?, cost_fixed = ?, cost_labour = ?, cost_extra = ?, note = ?,
-               finish_token = ?, updated_at = ?
+               finish_token = ?, submission_key = ?, updated_at = ?
              WHERE id = ? AND order_id = ? AND status = 'planeada' AND printer_id = ? AND ${guard}
+               AND NOT EXISTS (SELECT 1 FROM print_jobs taken WHERE taken.submission_key = ?)
              RETURNING id`,
           )
           .bind(
             job.printerId, statusForResult(job.result), job.actualMinutes, job.result, job.labourMinutes, job.extraCost,
-            cost.material, cost.energy, cost.machineWear, cost.fixedCosts, cost.labour, cost.extra, job.note, token, now,
-            jobId, orderId, plannedPrinterId, ...guardParams,
+            cost.material, cost.energy, cost.machineWear, cost.fixedCosts, cost.labour, cost.extra, job.note, token, submissionKey, now,
+            jobId, orderId, plannedPrinterId, ...guardParams, submissionKey,
           ),
         ...job.filaments.map((f) =>
           db.prepare(`INSERT INTO print_job_filaments (job_id, spool_id, grams) SELECT ?, ?, ? WHERE ${finished}`).bind(jobId, f.spoolId, f.grams, jobId, token),
@@ -397,7 +413,14 @@ export function memoryRealCost(tables: MemoryTables, orderId: string): RealCost 
 /** Adapter: in-memory storage for tests. Shares its tables with the in-memory order, printer and spool repositories. */
 export function memoryPrintJobRepository(tables: MemoryTables): PrintJobRepository {
   const { printJobs, printers, spools } = tables;
-  const view = (job: StoredPrintJob): PrintJob => ({
+  // As D1's AUTOINCREMENT: ids only grow, so a deleted job's id is never given to a new one.
+  let lastId = Math.max(0, ...printJobs.keys());
+  const nextId = () => {
+    lastId = Math.max(lastId, ...printJobs.keys()) + 1;
+    return lastId;
+  };
+  const keyTaken = (submissionKey: string | null) => submissionKey !== null && [...printJobs.values()].some((j) => j.submissionKey === submissionKey);
+  const view = ({ submissionKey: _key, ...job }: StoredPrintJob): PrintJob => ({
     ...structuredClone(job),
     printer: printers.get(job.printerId)?.name ?? '',
     filaments: job.filaments.map((f) => {
@@ -410,20 +433,17 @@ export function memoryPrintJobRepository(tables: MemoryTables): PrintJobReposito
     async listByOrder(orderId) {
       return memoryJobs(tables, orderId).map(view);
     },
-    async costOf(orderId) {
-      return memoryRealCost(tables, orderId);
-    },
-    async log(orderId, job, cost) {
+    async log(orderId, job, cost, submissionKey = null) {
       // No await in here, so nothing can run between the checks and the writes.
       const printer = printers.get(job.printerId);
       const enough = job.filaments.every((f) => (spools.get(f.spoolId)?.remainingGrams ?? -1) >= f.grams);
-      if (!tables.orders.has(orderId) || !printer || !enough) return null;
+      if (!tables.orders.has(orderId) || !printer || !enough || keyTaken(submissionKey)) return null;
       const now = new Date().toISOString();
       const stored: StoredPrintJob = {
-        id: Math.max(0, ...printJobs.keys()) + 1, orderId, printerId: job.printerId, status: statusForResult(job.result), result: job.result,
+        id: nextId(), orderId, printerId: job.printerId, status: statusForResult(job.result), result: job.result,
         plannedStart: null, estimatedMinutes: null, actualMinutes: job.actualMinutes, labourMinutes: job.labourMinutes, extraCost: job.extraCost,
         cost: { ...cost }, note: job.note,
-        filaments: job.filaments.map((f) => ({ ...f })), createdAt: now, updatedAt: now,
+        filaments: job.filaments.map((f) => ({ ...f })), createdAt: now, updatedAt: now, submissionKey,
       };
       printJobs.set(stored.id, stored);
       printers.set(printer.id, { ...printer, printMinutes: printer.printMinutes + job.actualMinutes, updatedAt: now });
@@ -446,6 +466,10 @@ export function memoryPrintJobRepository(tables: MemoryTables): PrintJobReposito
       printJobs.delete(jobId);
       return true;
     },
+    async bySubmission(submissionKey) {
+      const job = [...printJobs.values()].find((j) => j.submissionKey === submissionKey);
+      return job ? view(job) : null;
+    },
     async get(jobId) {
       const job = printJobs.get(jobId);
       return job ? view(job) : null;
@@ -462,7 +486,7 @@ export function memoryPrintJobRepository(tables: MemoryTables): PrintJobReposito
       if (overlappingJob(plan, [...printJobs.values()])) return null;
       const now = new Date().toISOString();
       const stored: StoredPrintJob = {
-        id: Math.max(0, ...printJobs.keys()) + 1, orderId, printerId: plan.printerId, status: 'planeada', result: null,
+        id: nextId(), orderId, printerId: plan.printerId, status: 'planeada', result: null,
         plannedStart: plan.plannedStart, estimatedMinutes: plan.estimatedMinutes, actualMinutes: null, labourMinutes: 0, extraCost: 0,
         cost: { ...NO_JOB_COST }, note: plan.note, filaments: [], createdAt: now, updatedAt: now,
       };
@@ -487,18 +511,18 @@ export function memoryPrintJobRepository(tables: MemoryTables): PrintJobReposito
       printJobs.delete(jobId);
       return true;
     },
-    async finish(orderId, jobId, plannedPrinterId, job, cost) {
+    async finish(orderId, jobId, plannedPrinterId, job, cost, submissionKey = null) {
       // No await in here, so nothing can run between the checks and the writes.
       const current = printJobs.get(jobId);
       const printer = printers.get(job.printerId);
       const enough = job.filaments.every((f) => (spools.get(f.spoolId)?.remainingGrams ?? -1) >= f.grams);
       const stillPlanned = current?.orderId === orderId && current.status === 'planeada' && current.printerId === plannedPrinterId;
-      if (!current || !stillPlanned || !tables.orders.has(orderId) || !printer || !enough) return null;
+      if (!current || !stillPlanned || !tables.orders.has(orderId) || !printer || !enough || keyTaken(submissionKey)) return null;
       const now = new Date().toISOString();
       const finished: StoredPrintJob = {
         ...current, printerId: job.printerId, status: statusForResult(job.result), result: job.result, actualMinutes: job.actualMinutes,
         labourMinutes: job.labourMinutes, extraCost: job.extraCost, cost: { ...cost }, note: job.note,
-        filaments: job.filaments.map((f) => ({ ...f })), updatedAt: now,
+        filaments: job.filaments.map((f) => ({ ...f })), updatedAt: now, submissionKey,
       };
       printJobs.set(jobId, finished);
       printers.set(printer.id, { ...printer, printMinutes: printer.printMinutes + job.actualMinutes, updatedAt: now });

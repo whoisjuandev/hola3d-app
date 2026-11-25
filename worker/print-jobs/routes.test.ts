@@ -10,7 +10,7 @@ import { memoryOrderRepository } from '../orders/repository';
 import { memoryPrinterRepository } from '../printers/repository';
 import { memoryCostSettingsRepository } from '../settings/repository';
 import { memorySpoolRepository, type SpoolRepository } from '../spools/repository';
-import { memoryPrintJobRepository } from './repository';
+import { memoryPrintJobRepository, type PrintJobRepository } from './repository';
 import { handlePrintJobs } from './routes';
 
 const stamp = '2026-11-01T00:00:00.000Z';
@@ -48,12 +48,13 @@ const loggedView: PrintJob = {
   ...logged, printer: 'La A1', filaments: [{ spoolId: 1, spool: 'PLA Blanco · Grilon3', colorHex: '#ffffff', grams: 36 }],
 };
 
-function setup(options: { spools?: (repo: SpoolRepository) => SpoolRepository } = {}) {
+function setup(options: { spools?: (repo: SpoolRepository) => SpoolRepository; jobs?: (repo: PrintJobRepository) => PrintJobRepository } = {}) {
   const tables = memoryTables([cafe], [keychains, pot], [], { printers: [a1], spools: [white, yellow], printJobs: [logged] });
   const printers = memoryPrinterRepository(tables);
   const spoolRepo = memorySpoolRepository(tables);
+  const jobRepo = memoryPrintJobRepository(tables);
   const deps = {
-    jobs: memoryPrintJobRepository(tables),
+    jobs: options.jobs ? options.jobs(jobRepo) : jobRepo,
     orders: memoryOrderRepository(tables),
     printers,
     spools: options.spools ? options.spools(spoolRepo) : spoolRepo,
@@ -88,6 +89,26 @@ describe('GET /api/orders/:id/jobs', () => {
         cost: { ...loggedCost, total: 5748, minutes: 120, grams: 36, jobs: 1, failedJobs: 0 },
       },
     });
+  });
+
+  it('works the cost out from the jobs it answers, read once', async () => {
+    // The rows as one read saw them (here with a different extra cost than stored): the totals must add up these rows.
+    let reads = 0;
+    const { call } = setup({
+      jobs: (repo) => ({
+        ...repo,
+        listByOrder: async (orderId) => {
+          reads += 1;
+          return (await repo.listByOrder(orderId)).map((j) => ({ ...j, cost: { ...j.cost, extra: 1500 } }));
+        },
+      }),
+    });
+    const cost = { ...loggedCost, extra: 1500 };
+    expect(await call('GET', '/api/orders/0142/jobs')).toEqual({
+      status: 200,
+      body: { jobs: [{ ...loggedView, cost }], cost: { ...cost, total: 6748, minutes: 120, grams: 36, jobs: 1, failedJobs: 0 } },
+    });
+    expect(reads).toBe(1);
   });
 
   it('answers an empty list and no cost for an order without jobs', async () => {
@@ -224,6 +245,60 @@ describe('POST /api/orders/:id/jobs', () => {
     expect(await snapshot()).toEqual(before);
   });
 
+  const key = '0b6c5f4e-9a51-4c1e-8f43-2f1d3c4b5a69';
+
+  it('stores a retried log once: the same key answers the job already logged with 200 and changes nothing', async () => {
+    const { call, snapshot } = setup();
+    const first = await call('POST', '/api/orders/0142/jobs', { ...newJob, submissionKey: key });
+    expect(first.status).toBe(201);
+    const after = await snapshot();
+    // The first try took the last 30 g of yellow: without the key a second one would be refused for grams.
+    expect(await call('POST', '/api/orders/0142/jobs', { ...newJob, submissionKey: key })).toEqual({ status: 200, body: first.body });
+    expect(await snapshot()).toEqual(after);
+    expect(after.jobs).toHaveLength(2);
+  });
+
+  it('answers the job another try stored with the same key between this one\'s check and its write, changing nothing more', async () => {
+    let landOther = true;
+    const { call, snapshot } = setup({
+      jobs: (repo) => ({
+        ...repo,
+        log: async (orderId, job, cost, submissionKey) => {
+          if (landOther) { landOther = false; await repo.log(orderId, job, cost, submissionKey); }
+          return repo.log(orderId, job, cost, submissionKey);
+        },
+      }),
+    });
+    const { status, body } = await call('POST', '/api/orders/0142/jobs', { ...newJob, filaments: [{ spoolId: 1, grams: 30 }], submissionKey: key });
+    expect(status).toBe(200);
+    expect(body.job).toMatchObject({ id: 2, orderId: '0142', actualMinutes: 90 });
+    expect(await snapshot()).toMatchObject({ printMinutes: 7290, grams: [[1, 610], [2, 30]] });
+    expect((await snapshot()).jobs).toHaveLength(2);
+  });
+
+  it('answers 409 for a key a job of another order carries, and changes nothing', async () => {
+    const { call, snapshot } = setup();
+    expect((await call('POST', '/api/orders/0143/jobs', { ...newJob, filaments: [{ spoolId: 1, grams: 10 }], submissionKey: key })).status).toBe(201);
+    const before = await snapshot();
+    expect(await call('POST', '/api/orders/0142/jobs', { ...newJob, submissionKey: key })).toEqual({
+      status: 409, body: { error: 'Esa clave de envío ya se usó para una impresión de otro pedido.' },
+    });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('rejects a key that is not 8 to 64 letters, digits or dashes and changes nothing', async () => {
+    await expectRejected({ ...newJob, submissionKey: 'no' }, { submissionKey: 'La clave de envío tiene que tener de 8 a 64 letras, números o guiones.' });
+  });
+
+  it('logs the same body twice without a key, as two jobs', async () => {
+    const { call, snapshot } = setup();
+    const body = { ...newJob, filaments: [{ spoolId: 1, grams: 30 }] };
+    expect((await call('POST', '/api/orders/0142/jobs', body)).status).toBe(201);
+    expect((await call('POST', '/api/orders/0142/jobs', body)).status).toBe(201);
+    expect(await snapshot()).toMatchObject({ printMinutes: 7380, grams: [[1, 580], [2, 30]] });
+    expect((await snapshot()).jobs).toHaveLength(3);
+  });
+
   it('takes a spool down to exactly 0 g', async () => {
     const { call, snapshot } = setup();
     expect((await call('POST', '/api/orders/0142/jobs', { ...newJob, filaments: [{ spoolId: 2, grams: 30 }] })).status).toBe(201);
@@ -270,6 +345,17 @@ describe('DELETE /api/orders/:id/jobs/:jobId', () => {
     const before = await snapshot();
     expect(await call('DELETE', '/api/orders/0143/jobs/1')).toEqual({ status: 404, body: { error: 'El pedido #0143 no tiene la impresión 1.' } });
     expect(await snapshot()).toEqual(before);
+  });
+
+  it('never gives a deleted job\'s id to a new one, so a retried delete cannot delete its replacement', async () => {
+    const { call, snapshot } = setup();
+    expect((await call('DELETE', '/api/orders/0142/jobs/1')).status).toBe(200); // the only job
+    const { status, body } = await call('POST', '/api/orders/0142/jobs', newJob);
+    expect(status).toBe(201);
+    expect(body.job).toMatchObject({ id: 2 });
+    const after = await snapshot();
+    expect(await call('DELETE', '/api/orders/0142/jobs/1')).toEqual({ status: 404, body: { error: 'El pedido #0142 no tiene la impresión 1.' } });
+    expect(await snapshot()).toEqual(after);
   });
 
   it('answers 404 the second time, giving nothing back twice', async () => {

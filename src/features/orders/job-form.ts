@@ -34,10 +34,12 @@ export function draftMinutes(hours: string, minutes: string): number | string {
 
 /**
  * The body of POST /api/orders/:id/jobs. Rows with neither spool nor grams are left out. Empty labour minutes and
- * extra cost go as null, which the API takes as 0.
+ * extra cost go as null, which the API takes as 0. `submissionKey`, made once when the form opens, lets the API
+ * recognise a retry of a save it already stored.
  */
-export function jobRequest(draft: JobDraft): Record<string, unknown> {
+export function jobRequest(draft: JobDraft, submissionKey?: string): Record<string, unknown> {
   return {
+    ...(submissionKey ? { submissionKey } : {}),
     printerId: draft.printerId ? Number(draft.printerId) : null,
     actualMinutes: draftMinutes(draft.hours, draft.minutes),
     result: draft.result,

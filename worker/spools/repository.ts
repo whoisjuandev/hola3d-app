@@ -6,7 +6,11 @@ export interface SpoolRepository {
   list(): Promise<Spool[]>;
   get(id: number): Promise<Spool | null>;
   create(input: SpoolInput): Promise<Spool>;
-  /** Writes only the fields in `changes`, so it never overwrites grams a print job took meanwhile. */
+  /**
+   * Writes only the fields in `changes`, so it never overwrites grams a print job took meanwhile. In the same statement it
+   * checks that the remaining grams the row will have are at most its net weight then (the sent values, the row's own
+   * for the rest). Null when there is no such spool or that check fails, having written nothing.
+   */
   update(id: number, changes: Partial<SpoolInput>): Promise<Spool | null>;
 }
 
@@ -76,9 +80,13 @@ export function d1SpoolRepository(db: D1Database): SpoolRepository {
 
     async update(id, changes) {
       const keys = (Object.keys(changes) as (keyof SpoolInput)[]).filter((k) => k in COLUMNS);
+      // The pair after the write, read from the row as the statement runs: a sent value, or (bound as NULL) the row's own.
       const row = await db
-        .prepare(`UPDATE spools SET ${keys.map((k) => `${COLUMNS[k]} = ?, `).join('')}updated_at = ? WHERE id = ? RETURNING *`)
-        .bind(...keys.map((k) => changes[k]), new Date().toISOString(), id)
+        .prepare(
+          `UPDATE spools SET ${keys.map((k) => `${COLUMNS[k]} = ?, `).join('')}updated_at = ?
+           WHERE id = ? AND COALESCE(?, remaining_grams) <= COALESCE(?, net_grams) RETURNING *`,
+        )
+        .bind(...keys.map((k) => changes[k]), new Date().toISOString(), id, changes.remainingGrams ?? null, changes.netGrams ?? null)
         .first<SpoolRow>();
       return row ? toSpool(row) : null;
     },
@@ -106,6 +114,8 @@ export function memorySpoolRepository(source: Spool[] | MemoryTables = []): Spoo
       const current = spools.get(id);
       if (!current) return null;
       const updated: Spool = { ...current, ...changes, updatedAt: new Date().toISOString() };
+      // No await in here, so the check sees the row the write changes, as the single D1 statement does.
+      if (updated.remainingGrams > updated.netGrams) return null;
       spools.set(id, updated);
       return updated;
     },

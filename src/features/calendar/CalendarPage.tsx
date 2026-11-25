@@ -1,5 +1,5 @@
 // Calendario: a month and a week of due orders, projects, service tasks by date, and the prints planned per printer.
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useState, type CSSProperties } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import type { CalendarData, CalendarPlannedJob } from '../../../shared/calendar';
 import type { Printer } from '../../../shared/printers';
@@ -11,7 +11,7 @@ import { fetchPrinters } from '../printers/api';
 import { durationLabel } from '../quotes/format';
 import { fetchCalendar } from './api';
 import {
-  KIND_LABEL, LABEL_MINUTES, WEEKDAYS, barPlacement, dayItems, packTracks, dayTitle, monthGrid, monthTitle, readView, shiftAnchor, timeRange, viewRange, weekDays, weekTitle,
+  KIND_LABEL, WEEKDAYS, dayBars, dayItems, dayTitle, hourMarks, laneHours, monthGrid, monthTitle, readView, shiftAnchor, timeRange, viewRange, weekDays, weekTitle,
   type CalendarView, type DayItem, type ItemKind,
 } from './format';
 import { PlanJobDialog, type PlannedJobRef } from './PlanJobDialog';
@@ -25,7 +25,6 @@ type Dialog = { job: CalendarPlannedJob } | { date: string; printerId?: number }
 
 const MONTH_LABELS = 3; // labels a month cell shows before "+N más"
 const TRACK_HEIGHT = 50; // px per track of a printer's row
-const WEEK_MINUTES = 7 * 24 * 60;
 
 export function CalendarPage() {
   const isPhone = useMediaQuery(PHONE_QUERY);
@@ -193,8 +192,11 @@ function WeekGrid({ anchor, today, data, printers, onPlan, onOpenJob }: {
   const days = weekDays(anchor);
   // One row per active printer, plus any other printer that has a planned job this week.
   const rows = printers.filter((p) => p.status === 'activa' || data.plannedJobs.some((j) => j.printerId === p.id));
+  // Every day column of every lane shows the same hours: the ones this week's jobs use, at least 08:00 to 20:00.
+  const hours = laneHours(data.plannedJobs, days);
+  const marks = hourMarks(hours);
   return (
-    <div className="cal-week">
+    <div className="cal-week" style={{ '--lane-hours': hours.to - hours.from } as CSSProperties}>
       <div className="cal-week__grid">
         <span className="cal-week__corner" />
         {days.map((d) => <DayHead key={d} day={d} today={today} />)}
@@ -206,40 +208,47 @@ function WeekGrid({ anchor, today, data, printers, onPlan, onOpenJob }: {
           </div>
         ))}
 
+        {rows.length > 0 && (
+          <>
+            <span className="cal-week__label cal-week__label--hours">Horario</span>
+            {days.map((d) => (
+              <div key={d} className="cal-week__hours" aria-hidden="true">
+                {marks.map((m) => <span key={m.text} style={{ left: `${m.left}%` }}>{m.text}</span>)}
+              </div>
+            ))}
+          </>
+        )}
+
         {rows.map((p) => {
           const jobs = data.plannedJobs.filter((j) => j.printerId === p.id);
-          const tracks = packTracks(jobs);
-          const trackCount = Math.max(1, ...[...tracks.values()].map((t) => t + 1));
+          const bars = days.map((d) => dayBars(jobs, d, hours));
+          const trackCount = Math.max(1, ...bars.map((b) => b.length));
           return (
             <Fragment key={p.id}>
               <span className="cal-week__label"><Icon name="printer" size={16} />{p.name}</span>
-              <div className="cal-week__lane" role="group" aria-label={`Impresiones de ${p.name}`} style={{ minHeight: 16 + trackCount * TRACK_HEIGHT }}>
-                <div className="cal-week__slots">
-                  {days.map((d) => (
-                    <button key={d} type="button" className="cal-week__slot" aria-label={`Planificar en ${p.name} el ${dayTitle(d)}`}
+              <div className="cal-week__lane" role="group" aria-label={`Impresiones de ${p.name}`}>
+                {days.map((d, i) => (
+                  <div key={d} className="cal-week__day-lane" style={{ minHeight: 16 + trackCount * TRACK_HEIGHT }}>
+                    <button type="button" className="cal-week__slot" aria-label={`Planificar en ${p.name} el ${dayTitle(d)}`}
                       disabled={p.status !== 'activa'} onClick={() => onPlan(d, p.id)} />
-                  ))}
-                </div>
-                {jobs.map((j) => {
-                  const { left, width } = barPlacement(j, anchor);
-                  if (width <= 0) return null;
-                  // The button runs from the job's start to the end of the week; its bar and label are sized inside it.
-                  const room = 100 - left;
-                  const labelWidth = Math.max(width, (LABEL_MINUTES / WEEK_MINUTES) * 100);
-                  return (
-                    <button key={j.id} type="button" className="cal-job"
-                      style={{ left: `${left}%`, width: `${room}%`, top: 8 + (tracks.get(j.id) ?? 0) * TRACK_HEIGHT }}
-                      title={`#${j.orderId} ${j.item} · ${timeRange(j)} · ${durationLabel(j.estimatedMinutes)}`}
-                      aria-label={`Impresión planeada del pedido #${j.orderId}, ${j.item}, ${dayTitle(j.start.slice(0, 10))} ${timeRange(j)}. Cambiar el plan.`}
-                      onClick={() => onOpenJob(j)}>
-                      <span className="cal-job__bar" style={{ width: `${(width / room) * 100}%` }} />
-                      <span className="cal-job__text" style={{ maxWidth: `${Math.min(100, (labelWidth / room) * 100)}%` }}>
-                        <span className="cal-job__label">#{j.orderId} {j.item}</span>
-                        <span className="cal-job__time">{timeRange(j)}</span>
-                      </span>
-                    </button>
-                  );
-                })}
+                    {bars[i].map(({ job: j, left, width, track, fromBefore, goesOn }) => {
+                      const text = `#${j.orderId} ${j.item} · ${timeRange(j)} · ${durationLabel(j.estimatedMinutes)}`;
+                      const barClass = ['cal-job__bar', fromBefore && 'cal-job__bar--from-before', goesOn && 'cal-job__bar--goes-on'].filter(Boolean).join(' ');
+                      return (
+                        // The button spans its day's column; the bar sits at the job's hours, the label under it stays in the column.
+                        <button key={j.id} type="button" className="cal-job" style={{ top: 8 + track * TRACK_HEIGHT }} title={text}
+                          aria-label={`Impresión planeada del pedido #${j.orderId}, ${j.item}, ${dayTitle(j.start.slice(0, 10))} ${timeRange(j)}. Cambiar el plan.`}
+                          onClick={() => onOpenJob(j)}>
+                          <span className="cal-job__track"><span className={barClass} style={{ marginLeft: `${left}%`, width: `${width}%` }} /></span>
+                          <span className="cal-job__text">
+                            <span className="cal-job__label">#{j.orderId} {j.item}</span>
+                            <span className="cal-job__time">{timeRange(j)}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
             </Fragment>
           );

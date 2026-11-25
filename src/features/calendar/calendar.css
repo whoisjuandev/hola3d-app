@@ -66,19 +66,31 @@
 .cal-week__label { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 8px 4px; font-size: 13px; font-weight: 900; overflow-wrap: anywhere; }
 .cal-week__cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 96px; padding: 6px; border-radius: 10px; background: var(--card); border: 2px solid var(--rule); }
 .cal-week__cell--today { border-color: var(--blue); }
-.cal-week__lane { position: relative; grid-column: 2 / -1; min-height: 66px; }
-.cal-week__slots { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
-.cal-week__slot { border-radius: 10px; border: 2px dashed var(--rule); background: rgba(255, 253, 247, 0.6); cursor: copy; }
+/* The hours every day column of a printer's lane shows (--lane-hours of them, set on .cal-week), labelled above the lanes. */
+.cal-week__label--hours { padding-top: 0; padding-bottom: 0; font-size: 12px; color: var(--soft); }
+.cal-week__hours { position: relative; height: 16px; }
+.cal-week__hours span { position: absolute; top: 0; padding-left: 3px; border-left: 1px solid var(--faint); font-size: 11px; line-height: 16px; font-weight: 800; color: var(--soft); font-variant-numeric: tabular-nums; }
+.cal-week__lane { grid-column: 2 / -1; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.cal-week__day-lane { position: relative; min-width: 0; min-height: 66px; }
+/* A faint line on every hour, over the slot's background and under the jobs. */
+.cal-week__day-lane::before {
+  content: ''; position: absolute; inset: 2px 0; z-index: 1; pointer-events: none;
+  background: repeating-linear-gradient(to right, var(--rule) 0 1px, transparent 1px calc(100% / var(--lane-hours, 12)));
+}
+.cal-week__slot { position: absolute; inset: 0; width: 100%; border-radius: 10px; border: 2px dashed var(--rule); background: rgba(255, 253, 247, 0.6); cursor: copy; }
 .cal-week__slot:disabled { cursor: default; background: transparent; }
 @media (hover: hover) { .cal-week__slot:not(:disabled):hover { border-color: var(--blue); background: var(--mist); } }
-/* A planned job: a bar from its start to its end, and its label under it. The button itself lets clicks through. */
+/* A planned job's part of one day: a bar at its hours, and its label under it, as wide as the day's column at most. */
 .cal-job {
-  position: absolute; display: flex; flex-direction: column; gap: 3px; padding: 0; border: 0; background: none; color: var(--ink);
-  font: inherit; text-align: left; pointer-events: none;
+  position: absolute; left: 0; right: 0; z-index: 2; display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 0; border: 0;
+  background: none; color: var(--ink); font: inherit; text-align: left; pointer-events: none;
 }
 .cal-job__bar, .cal-job__text { pointer-events: auto; cursor: pointer; }
+.cal-job__track { display: block; min-width: 0; }
 .cal-job__bar { display: block; min-width: 8px; height: 12px; border-radius: 999px; border: 2px solid var(--ink); background: var(--blue); }
-.cal-job__text { display: flex; flex-direction: column; min-width: 0; padding: 0 4px; border-radius: 6px; background: rgba(255, 253, 247, 0.92); }
+.cal-job__bar--from-before { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left-style: dashed; }
+.cal-job__bar--goes-on { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right-style: dashed; }
+.cal-job__text { display: flex; flex-direction: column; min-width: 0; max-width: 100%; margin: 0 3px; padding: 0 4px; border-radius: 6px; background: rgba(255, 253, 247, 0.92); }
 .cal-job__label, .cal-job__time { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-job__label { font-size: 12px; line-height: 15px; font-weight: 900; }
 .cal-job__time { font-size: 11px; line-height: 14px; font-weight: 700; color: var(--soft); }

@@ -83,14 +83,76 @@ export function timeRange(job: Pick<CalendarPlannedJob, 'start' | 'end'>): strin
   return `${startTime} – ${WEEKDAYS[weekdayIndex(endDay)].toLowerCase()} ${endTime}`;
 }
 
-const WEEK_MINUTES = 7 * 24 * 60;
+/** The hours a week's printer lanes show, on every day alike: from `from`:00 to `to`:00 (`to` up to 24). */
+export interface LaneHours {
+  from: number;
+  to: number;
+}
 
-/** Where a job's bar goes in a week row, in % of the row: from its start to its end, cut at the edges of the week. */
-export function barPlacement(job: Pick<CalendarPlannedJob, 'start' | 'end'>, anchor: string): { left: number; width: number } {
-  const origin = localMinutes(`${weekStart(anchor)}T00:00`);
-  const start = Math.max(0, localMinutes(job.start) - origin);
-  const end = Math.min(WEEK_MINUTES, localMinutes(job.end) - origin);
-  return { left: (start / WEEK_MINUTES) * 100, width: (Math.max(0, end - start) / WEEK_MINUTES) * 100 };
+/** The part of a job inside `date`, in minutes from that day's 00:00 (0 to 1440); null when it has none. */
+function partOnDay(job: Pick<CalendarPlannedJob, 'start' | 'end'>, date: string): { start: number; end: number } | null {
+  const dayStart = localMinutes(`${date}T00:00`);
+  const start = Math.max(localMinutes(job.start), dayStart) - dayStart;
+  const end = Math.min(localMinutes(job.end), dayStart + 24 * 60) - dayStart;
+  return end > start ? { start, end } : null;
+}
+
+/**
+ * The hours the week's lanes show: from the earliest start to the latest end of the jobs' parts on the week's days,
+ * rounded out to whole hours, and at least 08:00 to 20:00. A job past midnight counts as its part on each day.
+ */
+export function laneHours(jobs: Pick<CalendarPlannedJob, 'start' | 'end'>[], days: string[]): LaneHours {
+  let from = 8 * 60;
+  let to = 20 * 60;
+  for (const day of days) {
+    for (const job of jobs) {
+      const part = partOnDay(job, day);
+      if (!part) continue;
+      from = Math.min(from, part.start);
+      to = Math.max(to, part.end);
+    }
+  }
+  return { from: Math.floor(from / 60), to: Math.ceil(to / 60) };
+}
+
+export interface DayBar<J> {
+  job: J;
+  left: number; // % of the day's column
+  width: number; // % of the day's column
+  track: number; // 0, 1, …: the row of the lane it goes on
+  fromBefore: boolean; // it started on an earlier day
+  goesOn: boolean; // it ends on a later day
+}
+
+/**
+ * A printer's jobs on `date`, each placed in that day's column by its part of the day, in % of the lane hours. Each job
+ * of the day goes on its own track, in start order, so its label (as wide as the column) never covers another's.
+ */
+export function dayBars<J extends Pick<CalendarPlannedJob, 'id' | 'start' | 'end'>>(jobs: J[], date: string, hours: LaneHours): DayBar<J>[] {
+  const span = (hours.to - hours.from) * 60;
+  return jobs
+    .map((job) => ({ job, part: partOnDay(job, date) }))
+    .filter((x): x is { job: J; part: { start: number; end: number } } => x.part !== null)
+    .sort((a, b) => a.part.start - b.part.start || a.job.id - b.job.id)
+    .map(({ job, part }, track) => ({
+      job,
+      left: ((part.start - hours.from * 60) / span) * 100,
+      width: ((part.end - part.start) / span) * 100,
+      track,
+      fromBefore: job.start < `${date}T00:00`,
+      goesOn: job.end > `${addDays(date, 1)}T00:00`,
+    }));
+}
+
+/** The hour labels over a day's column: every fourth hour of a lane of up to 12 hours, every sixth of a longer one. */
+export function hourMarks(hours: LaneHours): { text: string; left: number }[] {
+  const span = hours.to - hours.from;
+  const step = span <= 12 ? 4 : 6;
+  const marks: { text: string; left: number }[] = [];
+  for (let hour = hours.from; hour < hours.to; hour += step) {
+    marks.push({ text: String(hour).padStart(2, '0'), left: ((hour - hours.from) / span) * 100 });
+  }
+  return marks;
 }
 
 export type ItemKind = 'order' | 'project' | 'service' | 'job';
@@ -133,26 +195,4 @@ export function dayItems(data: CalendarData, date: string, withJobs = true): Day
     }
   }
   return items;
-}
-
-/** How long a job's label is allowed to run along its track, in minutes of the week: a bit less than a day. */
-export const LABEL_MINUTES = 20 * 60;
-
-/**
- * The track (0, 1, …) of each job in a printer's row, so a label never runs over another job: a job goes on the first
- * track where the jobs before it, with their labels, are done by its start. Jobs of one printer never overlap, so most
- * weeks need one track.
- */
-export function packTracks(jobs: Pick<CalendarPlannedJob, 'id' | 'start' | 'end'>[]): Map<number, number> {
-  const tracks: number[] = []; // per track, the minute it is free again
-  const out = new Map<number, number>();
-  for (const job of [...jobs].sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : a.id - b.id))) {
-    const start = localMinutes(job.start);
-    const busyUntil = Math.max(localMinutes(job.end), start + LABEL_MINUTES);
-    let track = tracks.findIndex((free) => free <= start);
-    if (track === -1) track = tracks.length;
-    tracks[track] = busyUntil;
-    out.set(job.id, track);
-  }
-  return out;
 }

@@ -1,7 +1,9 @@
 import { planProblems, validatePlannedJob, type PlannedJobInput } from '../../shared/calendar';
 import type { CostSettingsInput } from '../../shared/cost-settings';
 import { sentFields } from '../../shared/fields';
-import { jobCost, printJobProblems, validateNewPrintJob, type JobCost, type NewPrintJob, type PrintJob } from '../../shared/print-jobs';
+import {
+  jobCost, jobNotFoundMessage, planLockedMessage, printJobProblems, readSubmissionKey, realCost, validateNewPrintJob, type JobCost, type NewPrintJob, type PrintJob,
+} from '../../shared/print-jobs';
 import type { Printer } from '../../shared/printers';
 import type { Spool } from '../../shared/spools';
 import { isJsonObject, json, problem, readJson } from '../http';
@@ -28,7 +30,7 @@ const JOB_PLAN_PATH = /^\/api\/orders\/(\d{4,})\/jobs\/(\d+)\/plan$/;
 const INVALID = 'Revisá los datos de la impresión.';
 
 const orderNotFound = (id: string) => problem(404, `No existe el pedido #${id}.`);
-const jobNotFound = (orderId: string, jobId: number | string) => problem(404, `El pedido #${orderId} no tiene la impresión ${jobId}.`);
+const jobNotFound = (orderId: string, jobId: number | string) => problem(404, jobNotFoundMessage(orderId, jobId));
 const notAllowed = () => problem(405, 'Método no permitido.');
 const notJson = () => problem(400, 'El cuerpo tiene que ser JSON.');
 const invalid = (fields: Record<string, string>) => json({ error: INVALID, fields }, 422);
@@ -40,8 +42,9 @@ export async function handlePrintJobs(request: Request, url: URL, deps: PrintJob
     const orderId = jobsMatch[1];
     if (request.method === 'GET') {
       if (!(await deps.orders.get(orderId))) return orderNotFound(orderId);
-      const [jobs, cost] = await Promise.all([deps.jobs.listByOrder(orderId), deps.jobs.costOf(orderId)]);
-      return json({ jobs, cost });
+      // One read: the totals are added up from the very rows the answer lists, so they always agree.
+      const jobs = await deps.jobs.listByOrder(orderId);
+      return json({ jobs, cost: realCost(jobs) });
     }
     if (request.method === 'POST') return log(request, orderId, deps);
     return problem(405, 'Método no permitido.');
@@ -119,23 +122,45 @@ function costNow(job: NewPrintJob, printers: Printer[], spools: Spool[], setting
   return jobCost({ ...job, filaments }, printer, settings);
 }
 
+const KEY_USED = 'Esa clave de envío ya se usó para una impresión de otro pedido.';
+
+/**
+ * The answer to a save whose submission key a job already carries, so a retried save is not stored twice: that job and
+ * its order (200), or 409 when the job is another order's. Null when no job carries the key.
+ */
+async function savedBefore(orderId: string, submissionKey: string | null, deps: PrintJobDeps): Promise<Response | null> {
+  if (submissionKey === null) return null;
+  const job = await deps.jobs.bySubmission(submissionKey);
+  if (!job) return null;
+  if (job.orderId !== orderId) return problem(409, KEY_USED);
+  return json({ job, order: await deps.orders.get(orderId) });
+}
+
 /**
  * Log a finished job: store it with its cost, add its minutes to the printer and take its grams off each spool, all
- * or nothing. The cost is worked out here, once, and stored: later price or settings changes never change it.
+ * or nothing. The cost is worked out here, once, and stored: later price or settings changes never change it. A key a
+ * job of the order already carries answers that job: the save was stored before.
  */
 async function log(request: Request, orderId: string, deps: PrintJobDeps): Promise<Response> {
   const body = await readJson(request);
   if (body === undefined) return problem(400, 'El cuerpo tiene que ser JSON.');
   if (!(await deps.orders.get(orderId))) return orderNotFound(orderId);
   const result = validateNewPrintJob(body);
-  if (!result.ok) return invalid(result.errors);
+  const key = readSubmissionKey(body);
+  if (!result.ok || !key.ok) return invalid({ ...(result.ok ? {} : result.errors), ...(key.ok ? {} : key.errors) });
+  // Before the grams check: a retry comes after its first try took the grams.
+  const saved = await savedBefore(orderId, key.value, deps);
+  if (saved) return saved;
 
   const [printers, spools, settings] = await Promise.all([deps.printers.list(), deps.spools.list(), currentCostSettings(deps.settings)]);
   const problems = printJobProblems(result.value, printers, spools);
   if (problems) return invalid(problems);
 
-  const job = await deps.jobs.log(orderId, result.value, costNow(result.value, printers, spools, settings));
+  const job = await deps.jobs.log(orderId, result.value, costNow(result.value, printers, spools, settings), key.value);
   if (!job) {
+    // Another try of this save got there between the check above and the write.
+    const savedNow = await savedBefore(orderId, key.value, deps);
+    if (savedNow) return savedNow;
     // Another write (a log, a delete, an edit) landed after the check above and the guarded write refused: nothing
     // was written. Read again to say why.
     const now = await problemsNow(result.value, deps);
@@ -145,7 +170,7 @@ async function log(request: Request, orderId: string, deps: PrintJobDeps): Promi
 }
 
 const ALREADY_FINISHED = (jobId: number) => `La impresión ${jobId} ya se cargó como terminada.`;
-const PLAN_LOCKED = (jobId: number) => `La impresión ${jobId} ya se cargó como terminada: su plan no cambia.`;
+const PLAN_LOCKED = planLockedMessage;
 const TIME_TAKEN = 'Esa impresora se ocupó mientras guardabas: revisá el horario y probá de nuevo.';
 const PRINTER_CHANGED = (jobId: number) => `La impresión ${jobId} cambió de impresora mientras la terminabas: revisá y probá de nuevo.`;
 
@@ -190,17 +215,16 @@ async function updatePlan(request: Request, orderId: string, jobId: number, deps
   if (!current || current.orderId !== orderId) return jobNotFound(orderId, jobId);
   if (current.status !== 'planeada') return problem(409, PLAN_LOCKED(jobId));
 
-  // The stored plan fills in what the body leaves out only to validate it and word the errors; the write takes the
-  // sent fields alone and checks the result inside its statement.
+  // The stored plan fills in what the body leaves out only to validate the shape of the sent fields; the write takes
+  // the sent fields alone. Whether the printer is active and free is not judged here from the plan read above (another
+  // request may have moved the job since): the guarded statement checks it on the job as it is when it runs.
   const result = validatePlannedJob({ ...storedPlan(current), ...body });
   if (!result.ok) return invalid(result.errors);
   const changes = sentFields(result.value, body);
-  const problems = await planProblemsNow(result.value, deps, jobId);
-  if (problems) return invalid(problems);
 
   const job = await deps.jobs.updatePlan(orderId, jobId, changes);
   if (!job) {
-    // Another write changed the job, its printer or the printer's plans after the checks above; nothing was written.
+    // The guarded statement refused, or another write changed the job meanwhile; nothing was written. Read again to say why.
     const now = await deps.jobs.get(jobId);
     if (!now || now.orderId !== orderId) return jobNotFound(orderId, jobId);
     if (now.status !== 'planeada') return problem(409, PLAN_LOCKED(jobId));
@@ -221,6 +245,11 @@ async function finish(request: Request, orderId: string, jobId: number, deps: Pr
   if (!(await deps.orders.get(orderId))) return orderNotFound(orderId);
   const current = await deps.jobs.get(jobId);
   if (!current || current.orderId !== orderId) return jobNotFound(orderId, jobId);
+  const key = readSubmissionKey(body);
+  if (!key.ok) return invalid(key.errors);
+  // Before the status check: a retry finds the job its first try finished.
+  const saved = await savedBefore(orderId, key.value, deps);
+  if (saved) return saved;
   if (current.status !== 'planeada') return problem(409, ALREADY_FINISHED(jobId));
 
   // The printer the job is planned on as read here. The batch writes only while the job is still planned on it, so a
@@ -232,9 +261,11 @@ async function finish(request: Request, orderId: string, jobId: number, deps: Pr
   const problems = printJobProblems(result.value, printers, spools);
   if (problems) return invalid(problems);
 
-  const job = await deps.jobs.finish(orderId, jobId, plannedPrinterId, result.value, costNow(result.value, printers, spools, settings));
+  const job = await deps.jobs.finish(orderId, jobId, plannedPrinterId, result.value, costNow(result.value, printers, spools, settings), key.value);
   if (!job) {
     // Another write landed after the checks above and the guarded batch wrote nothing. Read again to say why.
+    const savedNow = await savedBefore(orderId, key.value, deps);
+    if (savedNow) return savedNow;
     const now = await deps.jobs.get(jobId);
     if (!now || now.orderId !== orderId) return jobNotFound(orderId, jobId);
     if (now.status !== 'planeada') return problem(409, ALREADY_FINISHED(jobId));

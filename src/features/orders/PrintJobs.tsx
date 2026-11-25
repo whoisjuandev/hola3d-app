@@ -2,12 +2,13 @@
 import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
 import type { Order } from '../../../shared/orders';
 import {
-  PRINT_RESULT_LABEL, REAL_COST_TERMS, jobCostTotal, realProfit, type PrintJob, type PrintResult, type RealCost,
+  PRINT_RESULT_LABEL, REAL_COST_TERMS, jobCostTotal, realCost, realProfit, type PrintJob, type PrintResult, type RealCost,
 } from '../../../shared/print-jobs';
 import type { Printer } from '../../../shared/printers';
 import { spoolLabel } from '../../../shared/calculator';
 import type { Spool } from '../../../shared/spools';
 import { Icon } from '../../ui/Icon';
+import { latestRequests } from '../../ui/latest';
 import { fetchPrinters } from '../printers/api';
 import { durationLabel } from '../quotes/format';
 import { fetchSpools } from '../spools/api';
@@ -39,34 +40,39 @@ function ResultChip({ result }: { result: PrintResult | null }) {
 
 export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChange: (order: Order) => void }) {
   const [jobs, setJobs] = useState<PrintJob[] | null>(null);
-  const [cost, setCost] = useState<RealCost | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Shared by the first load and every refresh, so an older answer never overwrites a newer one.
+  const [requests] = useState(latestRequests);
   const [logging, setLogging] = useState(false);
   const [finishing, setFinishing] = useState<PrintJob | null>(null);
   const [planning, setPlanning] = useState<PlannedJobRef | 'new' | null>(null);
   const [confirming, setConfirming] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
+  /** Read the jobs again. A failure leaves the list as it is and offers a retry. */
   const load = useCallback(async () => {
+    const isLatest = requests.start();
     try {
       const data = await fetchPrintJobs(order.id);
+      if (!isLatest()) return;
       setJobs(data.jobs);
-      setCost(data.cost);
-      setError(null);
+      setLoadError(null);
     } catch (e) {
-      setError((e as Error).message);
+      if (isLatest()) setLoadError((e as Error).message);
     }
-  }, [order.id]);
+  }, [order.id, requests]);
 
-  // Mounted with the order id as its key, so another order starts from a clean state.
+  // Mounted with the order id as its key, so another order starts from a clean state. The first load counts as a request
+  // too, so a refresh started before it answers wins.
   useEffect(() => {
-    let alive = true;
+    const isLatest = requests.start();
     fetchPrintJobs(order.id).then(
-      (data) => { if (alive) { setJobs(data.jobs); setCost(data.cost); setError(null); } },
-      (e: Error) => { if (alive) setError(e.message); },
+      (data) => { if (isLatest()) { setJobs(data.jobs); setLoadError(null); } },
+      (e: Error) => { if (isLatest()) setLoadError(e.message); },
     );
-    return () => { alive = false; };
-  }, [order.id]);
+    return () => requests.cancel();
+  }, [order.id, requests]);
 
   async function remove(job: PrintJob) {
     setBusy(true);
@@ -74,6 +80,9 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
       // A planned job is deleted as a plan, which refuses (409) once it has been finished meanwhile.
       onOrderChange(await (job.status === 'planeada' ? deletePlannedJob(order.id, job.id) : deletePrintJob(order.id, job.id)));
       setConfirming(null);
+      setError(null);
+      // It is gone: off the list now, whether or not the refresh below gets through.
+      setJobs((list) => list && list.filter((j) => j.id !== job.id));
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -95,8 +104,14 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
       </div>
 
       {error && <p className="field__error" role="alert">{error}</p>}
+      {loadError && (
+        <div className="error-banner" role="alert">
+          <span>{jobs === null ? loadError : `No pudimos actualizar las impresiones: ${loadError}`}</span>
+          <button type="button" className="btn btn--ghost btn--sm" onClick={() => void load()}>Reintentar</button>
+        </div>
+      )}
 
-      <RealCostSummary price={order.price} cost={cost} />
+      <RealCostSummary price={order.price} cost={jobs && realCost(jobs)} />
 
       {logging && (
         <LogJobForm
@@ -108,7 +123,7 @@ export function PrintJobs({ order, onOrderChange }: { order: Order; onOrderChang
         />
       )}
 
-      {jobs === null && !error && <p className="muted">Cargando impresiones…</p>}
+      {jobs === null && !loadError && <p className="muted">Cargando impresiones…</p>}
       {jobs !== null && jobs.length === 0 && !logging && (
         <p className="jobs__empty">Todavía no cargaste impresiones. Al terminar una, cargá el tiempo y los gramos reales: suman horas a la impresora y descuentan filamento.</p>
       )}
@@ -192,7 +207,7 @@ function JobCostLine({ job }: { job: PrintJob }) {
   return <span className="job__cost">{parts.join(' · ')}</span>;
 }
 
-/** The totals come from the cost just fetched with the jobs, never from the board's copy of the order. */
+/** The totals are added up from the jobs just fetched (as the API does), never from the board's copy of the order. */
 function RealCostSummary({ price, cost }: { price: number; cost: RealCost | null }) {
   if (!cost) return null;
   const profit = realProfit(price, cost) as number;
@@ -232,6 +247,8 @@ function LogJobForm({ orderId, finishing, onLogged, onCancel }: {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [banner, setBanner] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // One key per opening of the form, sent with every try: a retry after a lost answer gets the job already stored.
+  const [submissionKey] = useState(() => crypto.randomUUID());
 
   // Fresh hours and grams every time the form opens.
   useEffect(() => {
@@ -258,7 +275,7 @@ function LogJobForm({ orderId, finishing, onLogged, onCancel }: {
     setSaving(true);
     setBanner(null);
     try {
-      const body = jobRequest(draft);
+      const body = jobRequest(draft, submissionKey);
       const { order } = finishing ? await finishPrintJob(orderId, finishing.id, body) : await logPrintJob(orderId, body);
       await onLogged(order);
     } catch (err) {

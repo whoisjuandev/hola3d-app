@@ -3,14 +3,14 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { isActive, type Order } from '../../../shared/orders';
-import type { PrintJob } from '../../../shared/print-jobs';
+import { planEditRefusal, type PrintJob } from '../../../shared/print-jobs';
 import type { Printer } from '../../../shared/printers';
 import { ApiError } from '../../ui/api';
 import { Icon } from '../../ui/Icon';
 import '../../ui/form-dialog.css';
 import '../orders/orders.css';
 import './calendar.css';
-import { deletePlannedJob, fetchOrders, planPrintJob, updatePlannedJob } from '../orders/api';
+import { deletePlannedJob, fetchOrders, fetchPrintJobs, planPrintJob, updatePlannedJob } from '../orders/api';
 import { fetchPrinters } from '../printers/api';
 import { planChanges, planDraft, planRequest, type PlanDraft } from './plan-form';
 
@@ -74,7 +74,20 @@ export function PlanJobDialog({ job, order, defaults, orderLink = false, onSaved
       return;
     }
     if (job && Object.keys(planChanges(draft, initial)).length === 0) {
-      onClose();
+      // Nothing to write, but the job may have been finished or deleted meanwhile: say so as a real save would.
+      setSaving(true);
+      try {
+        const { jobs } = await fetchPrintJobs(job.orderId);
+        const refusal = planEditRefusal(job.orderId, job.id, jobs.find((j) => j.id === job.id));
+        if (!refusal) {
+          onClose();
+          return;
+        }
+        setBanner(refusal);
+      } catch (err) {
+        setBanner((err as Error).message);
+      }
+      setSaving(false);
       return;
     }
     setSaving(true);

@@ -13,8 +13,11 @@ export type StoredOrder = Omit<Order, 'realCost' | 'realProfit' | 'project'>;
 /** A project as stored: its client by id only, the client's name read when it is read. */
 export type StoredProject = Omit<Project, 'client'>;
 
-/** A print job as stored: its printer and spools by id only, their names read when it is read. Its cost is stored as logged. */
-export type StoredPrintJob = Omit<PrintJob, 'printer' | 'filaments'> & { filaments: { spoolId: number; grams: number }[] };
+/**
+ * A print job as stored: its printer and spools by id only, their names read when it is read. Its cost is stored as logged.
+ * `submissionKey` is the key of the save that logged or finished it, if one was sent; it is not part of the API's job.
+ */
+export type StoredPrintJob = Omit<PrintJob, 'printer' | 'filaments'> & { filaments: { spoolId: number; grams: number }[]; submissionKey?: string | null };
 
 /** A service task as stored: its printer by id only, the printer's name and minutes read when it is read. */
 export type StoredServiceTask = Omit<ServiceTask, 'printer' | 'printerMinutes'>;

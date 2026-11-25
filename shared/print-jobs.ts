@@ -1,7 +1,7 @@
 // Print jobs on an order and the order's real cost, shared by the Worker API and the React app.
 import { energyCost, fixedCostsFor, machineWearCost, spoolLabel, spoolPricePerGram, spoolShortages, type CalcSpool } from './calculator';
 import type { CostSettingsInput } from './cost-settings';
-import { asBody, readInteger, readText, type Errors } from './fields';
+import { asBody, isMissing, readInteger, readText, type Errors } from './fields';
 import type { ValidationResult } from './orders';
 import type { Printer } from './printers';
 import type { Spool } from './spools';
@@ -105,6 +105,31 @@ export function validateNewPrintJob(input: unknown): ValidationResult<NewPrintJo
       labourMinutes: labourMinutes as number, extraCost: extraCost as number, note, filaments,
     },
   };
+}
+
+const SUBMISSION_KEY_RE = /^[A-Za-z0-9-]{8,64}$/;
+
+/**
+ * The optional `submissionKey` of a log or finish request: a random value the form makes when it opens and sends with
+ * every try of that save, so a retried save is recognised instead of stored twice. Null when the body has none.
+ */
+export function readSubmissionKey(input: unknown): ValidationResult<string | null> {
+  const key = asBody(input).submissionKey;
+  if (isMissing(key)) return { ok: true, value: null };
+  if (typeof key === 'string' && SUBMISSION_KEY_RE.test(key)) return { ok: true, value: key };
+  return { ok: false, errors: { submissionKey: 'La clave de envío tiene que tener de 8 a 64 letras, números o guiones.' } };
+}
+
+export const jobNotFoundMessage = (orderId: string, jobId: number | string) => `El pedido #${orderId} no tiene la impresión ${jobId}.`;
+export const planLockedMessage = (jobId: number) => `La impresión ${jobId} ya se cargó como terminada: su plan no cambia.`;
+
+/**
+ * Why an edit of planned job `jobId` of the order cannot apply to `job`, the job as read now (undefined when it is not
+ * found): the same words the API answers a real edit with. Null while it is still a planned job of the order.
+ */
+export function planEditRefusal(orderId: string, jobId: number, job: Pick<PrintJob, 'orderId' | 'status'> | null | undefined): string | null {
+  if (!job || job.orderId !== orderId) return jobNotFoundMessage(orderId, jobId);
+  return job.status === 'planeada' ? null : planLockedMessage(jobId);
 }
 
 /**

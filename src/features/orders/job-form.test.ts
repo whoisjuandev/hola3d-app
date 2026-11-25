@@ -28,6 +28,10 @@ describe('jobRequest', () => {
     });
   });
 
+  it('sends the submission key the form made when it opened, so every try of one save carries the same one', () => {
+    expect(jobRequest(draft, '0b6c5f4e-9a51-4c1e-8f43-2f1d3c4b5a69')).toEqual({ ...jobRequest(draft), submissionKey: '0b6c5f4e-9a51-4c1e-8f43-2f1d3c4b5a69' });
+  });
+
   it('sends empty labour minutes and extra cost as null, for the API to take as 0', () => {
     expect(jobRequest({ ...draft, labourMinutes: '', extraCost: ' ' })).toMatchObject({ labourMinutes: null, extraCost: null });
   });

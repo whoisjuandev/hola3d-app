@@ -90,6 +90,37 @@ describe('PUT /api/spools/:id', () => {
     expect(await repo.get(1)).toMatchObject({ ...base, colorHex: '#fafafa', lowStockGrams: 200, remainingGrams: 760, updatedAt: expect.any(String) });
   });
 
+  /** The route's first read of the spool answers it as it was; right after, another edit writes `meanwhile`. */
+  async function racingPut(meanwhile: Partial<Spool>, body: unknown) {
+    const repo = memorySpoolRepository([base]);
+    let raced = false;
+    const racing: SpoolRepository = {
+      ...repo,
+      get: async (id) => {
+        const read = await repo.get(id);
+        if (!raced) { raced = true; await repo.update(id, meanwhile); }
+        return read;
+      },
+    };
+    const before = { ...(await repo.get(1)), ...meanwhile };
+    const url = new URL('https://app.test/api/spools/1');
+    const res = await read(await handleSpools(new Request(url, { method: 'PUT', body: JSON.stringify(body) }), url, racing));
+    const after = await repo.get(1);
+    return { res, before: { ...before, updatedAt: after?.updatedAt }, after };
+  }
+
+  it('refuses with 422 more remaining grams than a net weight another edit lowered meanwhile, changing nothing', async () => {
+    const { res, before, after } = await racingPut({ netGrams: 900 }, { remainingGrams: 950 });
+    expect(res).toEqual({ status: 422, body: { error: 'Revisá los datos de la bobina.', fields: { remainingGrams: 'No puede superar el peso neto de la bobina.' } } });
+    expect(after).toEqual(before);
+  });
+
+  it('refuses with 422 a net weight below remaining grams another edit raised meanwhile, changing nothing', async () => {
+    const { res, before, after } = await racingPut({ remainingGrams: 980 }, { netGrams: 950 });
+    expect(res).toEqual({ status: 422, body: { error: 'Revisá los datos de la bobina.', fields: { remainingGrams: 'No puede superar el peso neto de la bobina.' } } });
+    expect(after).toEqual(before);
+  });
+
   it('still fills a spool to its net weight when remaining grams are sent empty', async () => {
     const { run, repo } = call('PUT', '/api/spools/1', { remainingGrams: '' });
     const { status } = await read(await run());

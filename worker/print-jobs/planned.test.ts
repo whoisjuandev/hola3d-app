@@ -273,6 +273,19 @@ describe('PUT /api/orders/:id/jobs/:jobId', () => {
     expect(await snapshot()).toEqual(before);
   });
 
+  it('is not rejected from the printer an earlier read saw: the write checks the printer the job is on now', async () => {
+    const stale = staleJob();
+    const { call } = setup({ jobs: stale.wrap });
+    expect((await call('POST', '/api/orders/0142/jobs/plan', plan)).status).toBe(201); // job 3 on La A1, 25/11 14:00 to 16:40
+    expect((await call('PUT', '/api/orders/0143/jobs/2', { printerId: 3 })).status).toBe(200);
+    stale.readNext(plannedView); // on La A1 the new start would reach job 3; the job is on La P1S, which is free then
+    const { status, body } = await call('PUT', '/api/orders/0143/jobs/2', { plannedStart: '2026-11-25T15:00' });
+    expect(status).toBe(200);
+    const job = { ...plannedView, printerId: 3, printer: 'La P1S', plannedStart: '2026-11-25T15:00', updatedAt: anyStamp };
+    expect(body).toEqual({ job });
+    expect((await call('GET', '/api/orders/0143/jobs')).body).toEqual({ jobs: [job], cost: null });
+  });
+
   it('answers 404 for a job of another order, and 409 for a finished job, changing nothing', async () => {
     const { call, snapshot } = setup();
     const before = await snapshot();
@@ -399,6 +412,43 @@ describe('POST /api/orders/:id/jobs/:jobId/finish', () => {
     expect(await snapshot()).toEqual(after);
     expect(after.printMinutes).toEqual([[1, 7290], [2, 108450], [3, 600]]);
     expect(after.grams).toEqual([[1, 630], [2, 30]]);
+  });
+
+  const key = '7d3f0a2c-51b8-4e6a-9c0d-1e2f3a4b5c6d';
+
+  it('stores a retried finish once: the same key answers the finished job with 200 and changes nothing', async () => {
+    const { call, snapshot } = setup();
+    const first = await call('POST', '/api/orders/0143/jobs/2/finish', { ...finish, submissionKey: key });
+    expect(first.status).toBe(200);
+    const after = await snapshot();
+    expect(await call('POST', '/api/orders/0143/jobs/2/finish', { ...finish, submissionKey: key })).toEqual(first);
+    expect(await snapshot()).toEqual(after);
+    expect(after.printMinutes).toEqual([[1, 7290], [2, 108450], [3, 600]]);
+  });
+
+  it('answers the job another try finished with the same key between this one\'s check and its write', async () => {
+    let landOther = true;
+    const { call, snapshot } = setup({
+      jobs: (repo) => ({
+        ...repo,
+        finish: async (orderId, jobId, plannedPrinterId, job, cost, submissionKey) => {
+          if (landOther) { landOther = false; await repo.finish(orderId, jobId, plannedPrinterId, job, cost, submissionKey); }
+          return repo.finish(orderId, jobId, plannedPrinterId, job, cost, submissionKey);
+        },
+      }),
+    });
+    const { status, body } = await call('POST', '/api/orders/0143/jobs/2/finish', { ...finish, submissionKey: key });
+    expect(status).toBe(200);
+    expect(body.job).toMatchObject({ id: 2, status: 'terminada', actualMinutes: 90 });
+    expect(await snapshot()).toMatchObject({ printMinutes: [[1, 7290], [2, 108450], [3, 600]], grams: [[1, 610], [2, 0]] });
+  });
+
+  it('still answers 409 to a second finish without a key, or with another key', async () => {
+    const { call } = setup();
+    expect((await call('POST', '/api/orders/0143/jobs/2/finish', { ...finish, filaments: [{ spoolId: 1, grams: 10 }], submissionKey: key })).status).toBe(200);
+    const again = { status: 409, body: { error: 'La impresión 2 ya se cargó como terminada.' } };
+    expect(await call('POST', '/api/orders/0143/jobs/2/finish', { ...finish, filaments: [{ spoolId: 1, grams: 10 }] })).toEqual(again);
+    expect(await call('POST', '/api/orders/0143/jobs/2/finish', { ...finish, filaments: [{ spoolId: 1, grams: 10 }], submissionKey: 'otra-clave-1234' })).toEqual(again);
   });
 
   it('takes the planned printer when the body names none, and can finish on another printer', async () => {

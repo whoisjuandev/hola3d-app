@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CostSettingsInput } from './cost-settings';
 import {
-  jobCost, printJobProblems, realCost, realProfit, validateNewPrintJob, type CostedJob, type CostPrinter, type CostSpool, type JobCost, type JobCostInput,
+  jobCost, planEditRefusal, printJobProblems, readSubmissionKey, realCost, realProfit, validateNewPrintJob, type CostedJob, type CostPrinter, type CostSpool, type JobCost, type JobCostInput,
 } from './print-jobs';
 
 // Every cost at zero, so each test turns on only the term it checks.
@@ -210,5 +210,35 @@ describe('realCost from stored job costs', () => {
     expect(realProfit(18000, cost)).toBe(1350);
     expect(realProfit(10000, cost)).toBe(-6650);
     expect(realProfit(18000, null)).toBeNull();
+  });
+});
+
+describe('readSubmissionKey', () => {
+  it('reads the key a form made for one save, and no key when it is missing', () => {
+    expect(readSubmissionKey({ submissionKey: '0b6c5f4e-9a51-4c1e-8f43-2f1d3c4b5a69' })).toEqual({ ok: true, value: '0b6c5f4e-9a51-4c1e-8f43-2f1d3c4b5a69' });
+    expect(readSubmissionKey({})).toEqual({ ok: true, value: null });
+    expect(readSubmissionKey({ submissionKey: null })).toEqual({ ok: true, value: null });
+    expect(readSubmissionKey({ submissionKey: '' })).toEqual({ ok: true, value: null });
+  });
+
+  it('rejects a key that is not 8 to 64 letters, digits or dashes', () => {
+    const errors = { submissionKey: 'La clave de envío tiene que tener de 8 a 64 letras, números o guiones.' };
+    expect(readSubmissionKey({ submissionKey: 'corta' })).toEqual({ ok: false, errors });
+    expect(readSubmissionKey({ submissionKey: 'x'.repeat(65) })).toEqual({ ok: false, errors });
+    expect(readSubmissionKey({ submissionKey: 'con espacios adentro' })).toEqual({ ok: false, errors });
+    expect(readSubmissionKey({ submissionKey: 12345678 })).toEqual({ ok: false, errors });
+  });
+});
+
+describe('planEditRefusal', () => {
+  it('says why a plan edit cannot apply: the job is gone from the order, or it is no longer planned', () => {
+    expect(planEditRefusal('0143', 2, undefined)).toBe('El pedido #0143 no tiene la impresión 2.');
+    expect(planEditRefusal('0143', 2, { orderId: '0142', status: 'planeada' })).toBe('El pedido #0143 no tiene la impresión 2.');
+    expect(planEditRefusal('0143', 2, { orderId: '0143', status: 'terminada' })).toBe('La impresión 2 ya se cargó como terminada: su plan no cambia.');
+    expect(planEditRefusal('0143', 2, { orderId: '0143', status: 'fallida' })).toBe('La impresión 2 ya se cargó como terminada: su plan no cambia.');
+  });
+
+  it('has nothing to say while the job is still a planned job of the order', () => {
+    expect(planEditRefusal('0143', 2, { orderId: '0143', status: 'planeada' })).toBeNull();
   });
 });
