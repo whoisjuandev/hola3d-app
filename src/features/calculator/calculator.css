@@ -23,6 +23,23 @@
 }
 .calc-line__foot b { font-size: 22px; font-weight: 900; }
 
+/* ---- A 3D model loaded in the line ---- */
+.calc-line--drop { outline: 3px dashed var(--blue); outline-offset: 4px; }
+.calc-model { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: 16px; border: 2px dashed var(--rule); }
+.calc-model__pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.calc-model__hint { font-size: 14px; }
+.calc-model__error {
+  display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 12px;
+  background: var(--yellow-soft); border: 2px solid var(--red); font-size: 14px; line-height: 19px; font-weight: 700;
+}
+.calc-model__error .icon { color: var(--red); margin-top: 1px; }
+.calc-model__info { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-weight: 800; }
+.calc-model__file { overflow-wrap: anywhere; min-width: 0; }
+.calc-model__volume { font-variant-numeric: tabular-nums; color: var(--soft); }
+.calc-model__badge--estimado { background: var(--yellow-soft); border: 2px solid var(--yellow); }
+.calc-model__badge--laminador { background: var(--green-soft); border: 2px solid var(--green); }
+.calc-model__tune { display: grid; grid-template-columns: repeat(2, minmax(0, 160px)); gap: 12px; }
+
 /* A whole-number input with its unit inside, on the right. */
 .calc-input { position: relative; display: block; }
 .calc-input .field__control { width: 100%; padding-right: 44px; font-variant-numeric: tabular-nums; }
@@ -106,6 +123,8 @@
   .calc-line__grid--three { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .calc-line__grid--three > :last-child { grid-column: 1 / -1; }
   .calc-line__uses { padding: 12px; }
+  .calc-model { padding: 12px; }
+  .calc-model__tune { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .calc-use__main { grid-template-columns: 28px minmax(0, 1fr) 40px; }
   .calc-use__spool { grid-column: 2 / 4; }
   .calc-use__grams { grid-column: 1 / 3; }

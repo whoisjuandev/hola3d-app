@@ -13,6 +13,8 @@ import { Icon } from '../../ui/Icon';
 import { money } from '../orders/format';
 import { grams } from '../spools/format';
 import { badWhole, CHOOSE_AGAIN, decimalText, profitProblem, TYPED_MATERIAL, type LineDraft, type ProfitDraft, type UseDraft } from './draft';
+import { ModelLoader } from './ModelLoader';
+import { useFileDrop, useLineModel } from './useLineModel';
 
 function percent(n: number): string {
   return `${n.toLocaleString('es-AR', { maximumFractionDigits: 2 })} %`;
@@ -94,14 +96,19 @@ export function LineEditor({ index, line, result, printers, spools, shortages, c
   canRemove: boolean; onChange: (l: LineDraft) => void; onRemove: () => void; onAddUse: () => void;
 }) {
   const id = useId();
-  const set = (patch: Partial<LineDraft>) => onChange({ ...line, ...patch });
+  const model = useLineModel(line, spools, onChange);
+  const drop = useFileDrop((file) => void model.readFile(file));
+  const set = (patch: Partial<LineDraft>) => model.change({ ...line, ...patch });
   const title = line.name.trim() || `Pieza ${index + 1}`;
   return (
-    <article className="card calc-line" aria-labelledby={`${id}-title`}>
+    <article className={drop.over ? 'card calc-line calc-line--drop' : 'card calc-line'} aria-labelledby={`${id}-title`} {...drop.handlers}>
       <header className="calc-line__head">
         <h2 id={`${id}-title`} className="calc-line__title">{title}</h2>
         {canRemove && <button type="button" className="btn btn--ghost btn--sm" onClick={onRemove}>Quitar pieza</button>}
       </header>
+
+      <ModelLoader title={title} model={model.model} error={model.error} busy={model.busy}
+        onFile={(file) => void model.readFile(file)} onTune={model.tune} />
 
       <div className="calc-line__grid">
         <div className="field calc-line__name">
