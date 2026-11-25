@@ -1,3 +1,5 @@
+import { handleClients } from './clients/routes';
+import { d1ClientRepository } from './clients/repository';
 import { problem } from './http';
 import { handleOrders } from './orders/routes';
 import { d1OrderRepository } from './orders/repository';
@@ -10,7 +12,8 @@ type Handler = (request: Request, url: URL, env: Env) => Promise<Response | null
 
 /** Each module answers its own paths and returns null for the rest, so they are tried in turn. */
 const HANDLERS: Handler[] = [
-  (request, url, env) => handleOrders(request, url, d1OrderRepository(env.DB)),
+  (request, url, env) => handleOrders(request, url, d1OrderRepository(env.DB), d1ClientRepository(env.DB)),
+  (request, url, env) => handleClients(request, url, d1ClientRepository(env.DB), d1OrderRepository(env.DB)),
   (request, url, env) => handlePrinters(request, url, d1PrinterRepository(env.DB)),
   (request, url, env) => handleSpools(request, url, d1SpoolRepository(env.DB)),
 ];

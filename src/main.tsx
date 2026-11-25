@@ -4,6 +4,8 @@ import { createBrowserRouter, RouterProvider } from 'react-router';
 import '@fontsource/gochi-hand/400.css';
 import './index.css';
 import { AppShell } from './shell/AppShell';
+import { ClientPage } from './features/clients/ClientPage';
+import { ClientsPage } from './features/clients/ClientsPage';
 import { OrdersPage } from './features/orders/OrdersPage';
 import { PrintersPage } from './features/printers/PrintersPage';
 import { SpoolsPage } from './features/spools/SpoolsPage';
@@ -16,6 +18,8 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <ComingSoon title="¡Hola!" /> },
       { path: 'pedidos', element: <OrdersPage /> },
+      { path: 'clientes', element: <ClientsPage /> },
+      { path: 'clientes/:id', element: <ClientPage /> },
       { path: 'proyectos', element: <ComingSoon title="Proyectos" /> },
       { path: 'agenda', element: <ComingSoon title="Agenda" /> },
       { path: 'taller', element: <ComingSoon title="Servicio técnico" /> },

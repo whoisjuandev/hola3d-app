@@ -1,8 +1,12 @@
 // Presentational pieces of the Pedidos screen. State lives in OrdersPage.
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { Link } from 'react-router';
+import type { ClientSummary } from '../../../shared/clients';
+import { findClientByName } from '../../../shared/clients';
 import type { Channel, NewOrder, Order, Stage } from '../../../shared/orders';
 import { CHANNELS, STAGES, STAGE_LABEL, nextStage, previousStage, stageIndex } from '../../../shared/orders';
 import { Icon } from '../../ui/Icon';
+import { fetchClients } from '../clients/api';
 import { ApiError } from './api';
 import { depositLabel, dueLabel, isOverdue, money } from './format';
 
@@ -121,7 +125,7 @@ export function OrderDetail({ order, today, asSheet, onMove, onClose }: {
         </div>
 
         <dl className="detail__facts">
-          <div><dt>Cliente</dt><dd>{order.client}</dd></div>
+          <div><dt>Cliente</dt><dd>{order.clientId === null ? order.client : <Link to={`/clientes/${order.clientId}`}>{order.client}</Link>}</dd></div>
           <div><dt>Canal</dt><dd>{order.channel}</dd></div>
           <div><dt>Entrega</dt><dd>{dueLabel(order, today)}</dd></div>
           <div><dt>Material</dt><dd>{order.material || '—'}</dd></div>
@@ -173,6 +177,7 @@ export function NewOrderDialog({ onCreate, onClose }: { onCreate: (input: Partia
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [banner, setBanner] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [clients, setClients] = useState<ClientSummary[]>([]);
   const uid = useId();
 
   useEffect(() => {
@@ -181,6 +186,15 @@ export function NewOrderDialog({ onCreate, onClose }: { onCreate: (input: Partia
     return () => dialog?.close();
   }, []);
 
+  // Without the list the form still works: the API matches the typed name to an existing client.
+  useEffect(() => {
+    let alive = true;
+    fetchClients().then((list) => { if (alive) setClients(list); }, () => undefined);
+    return () => { alive = false; };
+  }, []);
+
+  const picked = findClientByName(clients, form.client);
+
   const set = (key: keyof FormState) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
   async function submit(e: FormEvent) {
@@ -188,8 +202,11 @@ export function NewOrderDialog({ onCreate, onClose }: { onCreate: (input: Partia
     setSaving(true);
     setBanner(null);
     try {
+      const { client, ...rest } = form;
       await onCreate({
-        ...form,
+        ...rest,
+        // A name from the list links that client; any other name creates a new one.
+        ...(picked ? { clientId: picked.id } : { client }),
         channel: form.channel as Channel,
         dueDate: form.dueDate || null,
         dueTime: form.dueTime || null,
@@ -199,20 +216,29 @@ export function NewOrderDialog({ onCreate, onClose }: { onCreate: (input: Partia
       onClose();
     } catch (err) {
       const apiErr = err as ApiError;
-      setErrors(apiErr.fields ?? {});
+      const { clientId, ...fields } = apiErr.fields ?? {};
+      setErrors(clientId ? { client: clientId, ...fields } : fields);
       setBanner(apiErr.message);
       setSaving(false);
     }
   }
 
-  const field = (key: keyof FormState, label: string, props: Record<string, unknown> = {}) => (
+  const field = (key: keyof FormState, label: string, props: Record<string, unknown> = {}, hint?: string) => (
     <div className="field">
       <label className="field__label" htmlFor={`${uid}-${key}`}>{label}</label>
       <input id={`${uid}-${key}`} className="field__control" value={form[key]} onChange={set(key)}
-        aria-invalid={!!errors[key]} aria-describedby={errors[key] ? `${uid}-${key}-err` : undefined} {...props} />
-      {errors[key] && <span id={`${uid}-${key}-err`} className="field__error">{errors[key]}</span>}
+        aria-invalid={!!errors[key]} aria-describedby={errors[key] ? `${uid}-${key}-err` : hint ? `${uid}-${key}-hint` : undefined} {...props} />
+      {errors[key]
+        ? <span id={`${uid}-${key}-err`} className="field__error">{errors[key]}</span>
+        : hint && <span id={`${uid}-${key}-hint`} className="muted" aria-live="polite">{hint}</span>}
     </div>
   );
+
+  const clientHint = picked
+    ? `Cliente de la lista: ${picked.name} · ${picked.orderCount} ${picked.orderCount === 1 ? 'pedido' : 'pedidos'}`
+    : form.client.trim()
+      ? 'Cliente nuevo: se crea al guardar el pedido.'
+      : 'Elegí uno de la lista o escribí un nombre nuevo.';
 
   return (
     <dialog ref={ref} className="new-order" aria-labelledby={`${uid}-title`} onCancel={onClose}>
@@ -224,7 +250,10 @@ export function NewOrderDialog({ onCreate, onClose }: { onCreate: (input: Partia
         {banner && <p className="field__error" role="alert">{banner}</p>}
         <div className="new-order__grid">
           {field('item', 'Qué hay que hacer', { placeholder: 'Llaveros con logo × 12', autoFocus: true })}
-          {field('client', 'Cliente', { placeholder: 'Nombre o comercio' })}
+          {field('client', 'Cliente', { placeholder: 'Nombre o comercio', list: `${uid}-clients`, autoComplete: 'off' }, clientHint)}
+          <datalist id={`${uid}-clients`}>
+            {clients.map((c) => <option key={c.id} value={c.name} />)}
+          </datalist>
           <div className="field">
             <label className="field__label" htmlFor={`${uid}-channel`}>Llegó por</label>
             <select id={`${uid}-channel`} className="field__control" value={form.channel} onChange={set('channel')}>

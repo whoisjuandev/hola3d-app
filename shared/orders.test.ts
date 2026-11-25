@@ -42,7 +42,19 @@ describe('validateNewOrder', () => {
 
   it('accepts a complete order and normalizes empty optional fields', () => {
     const r = validateNewOrder(valid);
-    expect(r).toEqual({ ok: true, value: { ...valid, dueTime: null } });
+    expect(r).toEqual({ ok: true, value: { ...valid, dueTime: null, clientId: null } });
+  });
+
+  it('takes an existing client by id instead of a name', () => {
+    const r = validateNewOrder({ ...valid, client: '', clientId: 3 });
+    expect(r).toEqual({ ok: true, value: { ...valid, client: '', clientId: 3, dueTime: null } });
+  });
+
+  it('rejects a client id that is not a whole number above 0', () => {
+    for (const clientId of [0, -1, 1.5, 'tres']) {
+      const r = validateNewOrder({ ...valid, clientId });
+      expect(r).toEqual({ ok: false, errors: { clientId: 'Elegí un cliente de la lista.' } });
+    }
   });
 
   it('reports every missing required field', () => {

@@ -9,7 +9,7 @@ export interface FieldSpec {
   label: string;
   type?: 'text' | 'select' | 'color' | 'textarea';
   options?: readonly { value: string; label: string }[];
-  inputMode?: 'numeric' | 'decimal';
+  inputMode?: 'numeric' | 'decimal' | 'tel' | 'email';
   placeholder?: string;
   suggestions?: readonly string[];
   hint?: string;

@@ -24,6 +24,7 @@ describe('API dispatch', () => {
     expect(await get('/api/orders')).toEqual({ status: 200, body: { orders: [] } });
     expect(await get('/api/printers')).toEqual({ status: 200, body: { printers: [] } });
     expect(await get('/api/spools')).toEqual({ status: 200, body: { spools: [] } });
+    expect(await get('/api/clients')).toEqual({ status: 200, body: { clients: [] } });
   });
 
   it('answers 404 when no module owns the path', async () => {

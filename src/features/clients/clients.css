@@ -1,0 +1,51 @@
+.clients, .client-page { display: flex; flex-direction: column; gap: 20px; }
+.clients__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.clients__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; align-items: start; }
+
+.client-card { display: flex; flex-direction: column; gap: 14px; padding: 20px; }
+.client-card__name { font-size: 22px; line-height: 26px; font-weight: 900; }
+.client-card__name a { color: var(--ink); text-decoration: none; }
+@media (hover: hover) { .client-card__name a:hover { text-decoration: underline; } }
+.client-card__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.contact-links { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.contact-links a {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px;
+  border-radius: 999px; background: var(--mist); border: 2px solid var(--rule);
+  color: var(--ink); font-size: 14px; font-weight: 800; text-decoration: none; overflow-wrap: anywhere;
+}
+@media (hover: hover) { .contact-links a:hover { border-color: var(--ink); } }
+
+.client-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.client-totals dt { font-size: 13px; font-weight: 700; color: var(--soft); }
+.client-totals dd { margin-top: 2px; font-weight: 900; font-size: 17px; font-variant-numeric: tabular-nums; }
+.client-totals--big dd { font-size: 26px; }
+.client-totals__owed { color: var(--red); }
+
+.back-link { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; font-weight: 800; text-decoration: none; }
+
+.client-page__top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 18px; align-items: start; }
+.client-page__contact, .client-page__money { display: flex; flex-direction: column; gap: 14px; padding: 20px; }
+.client-page__section { font-size: 20px; line-height: 24px; font-weight: 900; }
+.client-page__note { padding: 10px 12px; border-radius: 12px; border: 2px dashed var(--rule); font-size: 14px; line-height: 20px; }
+.client-page__orders { display: flex; flex-direction: column; gap: 12px; }
+
+.client-orders { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.client-order {
+  display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 16px;
+  border-radius: 8px; background: var(--card); box-shadow: var(--shadow-card);
+}
+.client-order__main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.client-order__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; font-weight: 800; color: var(--soft); }
+.client-order__item { font-size: 16px; line-height: 20px; font-weight: 900; }
+.client-order__money { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; text-align: right; font-variant-numeric: tabular-nums; }
+.client-order__money b { font-size: 17px; font-weight: 900; }
+.client-order__owed { font-size: 13px; font-weight: 800; color: var(--red); }
+
+@media (max-width: 760px) {
+  .clients, .client-page { gap: 16px; }
+  .clients__grid { grid-template-columns: 1fr; gap: 14px; }
+  .client-page__top { grid-template-columns: 1fr; }
+  .client-totals--big dd { font-size: 20px; }
+  .client-order { align-items: flex-start; }
+}

@@ -8,7 +8,8 @@ The internal workshop app for Hola3D, a 3D printing shop. It tracks every order 
 
 | Section | State |
 |---|---|
-| Pedidos (orders) | Works end to end: board, search, new order, stage moves |
+| Pedidos (orders) | Works end to end: board, search, new order (pick a client or type a new one), stage moves |
+| Clientes (clients) | List with search, create and edit. Client page with contact links, orders, total spent and balance owed |
 | Impresoras (printers) | List, create and edit. Shows accumulated print hours and machine wear per print hour |
 | Filamento (spools) | List, create and edit. Filter by material, total stock in grams, low-stock warning |
 | Inicio, Proyectos, Calendario, Servicio técnico, Calculadora | Placeholder screens |
@@ -23,11 +24,11 @@ You need Node.js 22 or newer. Nothing here touches a Cloudflare account: the dat
 ```bash
 npm install
 npm run db:migrate   # create the local D1 tables
-npm run db:seed      # load sample orders, printers and spools
+npm run db:seed      # load sample clients, orders, printers and spools
 npm run dev
 ```
 
-Open the URL Vite prints and go to **Pedidos**. On a phone, Impresoras, Filamento and the calculator are the icons in the top bar.
+Open the URL Vite prints and go to **Pedidos**. On a phone the bottom bar has Inicio, Pedidos, Calendario and Clientes; **Más** opens a sheet with the other sections.
 
 ## Checks
 
@@ -43,11 +44,11 @@ One Cloudflare Worker serves both the React app and the API, and stores data in 
 
 | Folder | What lives there |
 |---|---|
-| `src/` | React 19 app (Vite, React Router). One folder per screen in `features/` (`orders/` is Pedidos, `printers/` Impresoras, `spools/` Filamento), `shell/` the navigation, `ui/` pieces the screens share (API calls, form dialog, icons) |
-| `worker/` | The Worker: API under `/api/*`, everything else is the single-page app. One folder per module (`orders/`, `printers/`, `spools/`) with its routes and a storage port with a D1 and an in-memory adapter; `index.ts` tries each module in turn |
-| `shared/` | Rules used by both sides: order stages, validation and search; printer validation, hours and wear cost; spool validation, low stock, material filter and stock totals |
+| `src/` | React 19 app (Vite, React Router). One folder per screen in `features/` (`orders/` is Pedidos, `clients/` Clientes, `printers/` Impresoras, `spools/` Filamento), `shell/` the navigation, `ui/` pieces the screens share (API calls, form dialog, icons) |
+| `worker/` | The Worker: API under `/api/*`, everything else is the single-page app. One folder per module (`orders/`, `clients/`, `printers/`, `spools/`) with its routes and a storage port with a D1 and an in-memory adapter (orders and clients share in-memory tables, `memory.ts`); `index.ts` tries each module in turn |
+| `shared/` | Rules used by both sides: order stages, validation and search; client validation, name matching, total spent, balance owed and contact links; printer validation, hours and wear cost; spool validation, low stock, material filter and stock totals |
 | `migrations/` | D1 schema, one file per change |
-| `seed/` | Sample orders, printers and spools, for local use only |
+| `seed/` | Sample clients, orders, printers and spools, for local use only |
 
 An order moves through five stages, in order:
 
@@ -57,9 +58,13 @@ An order moves through five stages, in order:
 
 | Method | Path | What it does |
 |---|---|---|
-| GET | `/api/orders` | List all orders |
+| GET | `/api/orders` | List all orders. Each one has `client` (the client's name) and `clientId` |
 | POST | `/api/orders` | Create an order. It starts in `nuevo` and takes the next number, padded to four digits |
 | PUT | `/api/orders/:id/stage` | Move an order to another stage |
+| GET | `/api/clients` | List clients, by name, each with `orderCount`, `totalSpent` and `balanceOwed` |
+| POST | `/api/clients` | Create a client |
+| GET | `/api/clients/:id` | One client with its totals, and its `orders` |
+| PUT | `/api/clients/:id` | Edit a client. Send only the fields to change; the rest keep their value |
 | GET | `/api/printers` | List printers, by name |
 | POST | `/api/printers` | Create a printer |
 | PUT | `/api/printers/:id` | Edit a printer. Send only the fields to change; the rest keep their value |
@@ -79,7 +84,9 @@ curl -X PUT http://localhost:5173/api/orders/0142/stage \
   -d '{"stage":"listo"}'
 ```
 
-A new order needs `item`, `client`, `channel` and `price` (whole pesos). `dueDate`, `dueTime`, `deposit`, `material` and `note` are optional. The channel is one of `Instagram`, `WhatsApp`, `Tienda web`, `Email` or `En persona`.
+A new order needs `item`, a client, `channel` and `price` (whole pesos). The client is either `clientId` (an existing client; an unknown id answers 422 on `clientId` and stores nothing) or `client`, a name: when it matches an existing client, ignoring case, accents and surrounding spaces, the order goes to that client; otherwise a client with that name is created. `dueDate`, `dueTime`, `deposit`, `material` and `note` are optional. The channel is one of `Instagram`, `WhatsApp`, `Tienda web`, `Email` or `En persona`.
+
+A client needs `name`. `phone`, `instagram` (stored without the `@`), `email` and `note` are optional. Total spent is the sum of the prices of delivered orders; balance owed adds price minus deposit over the orders not marked paid. The client page links the phone to `https://wa.me/<digits>` and the handle to `https://instagram.com/<handle>`.
 
 A printer needs `name`, `purchasePrice` (whole pesos), `lifetimeHours` (expected lifetime in print hours, at least 1) and `powerWatts` (average draw). `model` and `note` are optional, `printMinutes` (accumulated print time) starts at 0 and `status` at `activa`; the other statuses are `en_servicio` and `fuera_de_uso`. The screen shows the wear cost per print hour: purchase price ÷ lifetime hours.
 
@@ -102,7 +109,7 @@ Errors come back as JSON with an `error` message in Spanish, since the app shows
 | Status | When |
 |---|---|
 | 400 | The body is not JSON (for an edit, not a JSON object) |
-| 404 | The order, printer, spool or route does not exist |
+| 404 | The order, client, printer, spool or route does not exist |
 | 405 | The method is not allowed on that path |
 | 422 | The data is missing or invalid (the answer adds `fields`, one message per field), or the stage does not exist |
 

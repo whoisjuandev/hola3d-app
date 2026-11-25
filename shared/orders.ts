@@ -17,7 +17,8 @@ export type Channel = (typeof CHANNELS)[number];
 export interface Order {
   id: string; // order number padded to at least four digits, e.g. "0142"
   item: string;
-  client: string;
+  client: string; // the client's name, read through the client record
+  clientId: number | null; // null only for an old row the migration could not link
   channel: Channel;
   stage: Stage;
   dueDate: string | null; // YYYY-MM-DD
@@ -31,9 +32,14 @@ export interface Order {
   updatedAt: string;
 }
 
+/**
+ * A validated create-order request. It names its client either by `clientId` (an existing client) or by
+ * `client` (a name: an existing client when it matches, otherwise a new one). With `clientId`, `client` is ignored.
+ */
 export interface NewOrder {
   item: string;
   client: string;
+  clientId: number | null;
   channel: Channel;
   dueDate: string | null;
   dueTime: string | null;
@@ -103,7 +109,14 @@ export function validateNewOrder(input: unknown): ValidationResult<NewOrder> {
   };
 
   const item = text('item', 120, true);
-  const client = text('client', 80, true);
+  const rawClientId = body.clientId;
+  let clientId: number | null = null;
+  if (rawClientId != null && rawClientId !== '') {
+    if (typeof rawClientId === 'number' && Number.isInteger(rawClientId) && rawClientId > 0) clientId = rawClientId;
+    else errors.clientId = 'Elegí un cliente de la lista.';
+  }
+  // A client picked by id needs no name.
+  const client = text('client', 80, rawClientId == null || rawClientId === '');
   const material = text('material', 80, false);
   const note = text('note', 1000, false);
 
@@ -131,7 +144,7 @@ export function validateNewOrder(input: unknown): ValidationResult<NewOrder> {
   return {
     ok: true,
     value: {
-      item, client, material, note,
+      item, client, clientId, material, note,
       channel: channel as Channel,
       dueDate: dueDate as string | null,
       dueTime: dueTime as string | null,
