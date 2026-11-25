@@ -2,7 +2,7 @@ import { isStage, validateNewOrder } from '../../shared/orders';
 import { json, problem, readJson } from '../http';
 import type { OrderRepository } from './repository';
 
-const STAGE_PATH = /^\/api\/orders\/(\d{4})\/stage$/;
+const STAGE_PATH = /^\/api\/orders\/(\d{4,})\/stage$/;
 
 /** Handle /api/orders requests. Returns null when the path is not an order route. */
 export async function handleOrders(request: Request, url: URL, repo: OrderRepository): Promise<Response | null> {

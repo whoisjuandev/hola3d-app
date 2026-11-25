@@ -15,7 +15,7 @@ export const CHANNELS = ['Instagram', 'WhatsApp', 'Tienda web', 'Email', 'En per
 export type Channel = (typeof CHANNELS)[number];
 
 export interface Order {
-  id: string; // four-digit order number, e.g. "0142"
+  id: string; // order number padded to at least four digits, e.g. "0142"
   item: string;
   client: string;
   channel: Channel;

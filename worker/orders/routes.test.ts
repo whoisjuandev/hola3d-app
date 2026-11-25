@@ -66,6 +66,16 @@ describe('PUT /api/orders/:id/stage', () => {
     expect((await repo.get('0142'))?.stage).toBe('imprimiendo');
   });
 
+  it('moves an order numbered past 9999', async () => {
+    const repo = memoryOrderRepository([{ ...base, id: '10000' }]);
+    const url = new URL('https://app.test/api/orders/10000/stage');
+    const request = new Request(url, { method: 'PUT', body: JSON.stringify({ stage: 'listo' }) });
+    const { status, body } = await read(await handleOrders(request, url, repo));
+    expect(status).toBe(200);
+    expect((body.order as Order).stage).toBe('listo');
+    expect((await repo.get('10000'))?.stage).toBe('listo');
+  });
+
   it('answers 404 for an order that does not exist', async () => {
     const { run } = call('PUT', '/api/orders/0999/stage', { stage: 'listo' });
     const { status, body } = await read(await run());

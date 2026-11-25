@@ -55,7 +55,7 @@ export function d1OrderRepository(db: D1Database): OrderRepository {
   return {
     async list() {
       const { results } = await db
-        .prepare('SELECT * FROM orders ORDER BY due_date IS NULL, due_date, due_time, id')
+        .prepare('SELECT * FROM orders ORDER BY due_date IS NULL, due_date, due_time, CAST(id AS INTEGER)')
         .all<OrderRow>();
       return results.map(toOrder);
     },

@@ -56,7 +56,7 @@ An order moves through five stages, in order:
 | Method | Path | What it does |
 |---|---|---|
 | GET | `/api/orders` | List all orders |
-| POST | `/api/orders` | Create an order. It starts in `nuevo` and takes the next four-digit number |
+| POST | `/api/orders` | Create an order. It starts in `nuevo` and takes the next number, padded to four digits |
 | PUT | `/api/orders/:id/stage` | Move an order to another stage |
 
 ```bash
